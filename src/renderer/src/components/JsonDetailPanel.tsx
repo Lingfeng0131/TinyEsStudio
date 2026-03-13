@@ -18,11 +18,11 @@ export function JsonDetailPanel({ document, collapsed, onToggleCollapse }: JsonD
       <Card radius="xl" p="lg" className="json-card">
         <Stack gap="md" h="100%">
           <Group justify="space-between" align="flex-start">
-            <div>
-              <Text fw={700} size="lg">
+            <div className="json-heading">
+              <Text fw={700} size="lg" className="json-heading-title">
                 原始 JSON
               </Text>
-              <Text size="sm" c="dimmed">
+              <Text size="sm" c="dimmed" className="json-heading-subtitle">
                 查看当前选中文档的完整内容
               </Text>
             </div>

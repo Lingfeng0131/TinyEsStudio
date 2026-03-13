@@ -9,7 +9,9 @@ const api: EsApi = {
   getIndices: (connectionId) => ipcRenderer.invoke('indices:list', connectionId),
   getIndexFields: (connectionId, index) => ipcRenderer.invoke('indices:fields', connectionId, index),
   searchDocuments: (payload) => ipcRenderer.invoke('documents:search', payload),
-  updateDocument: (payload) => ipcRenderer.invoke('documents:update', payload)
+  createDocument: (payload) => ipcRenderer.invoke('documents:create', payload),
+  updateDocument: (payload) => ipcRenderer.invoke('documents:update', payload),
+  deleteDocument: (payload) => ipcRenderer.invoke('documents:delete', payload)
 };
 
 contextBridge.exposeInMainWorld('esApi', api);

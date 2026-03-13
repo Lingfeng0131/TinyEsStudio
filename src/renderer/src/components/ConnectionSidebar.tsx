@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ActionIcon, Badge, Button, Card, Collapse, Group, ScrollArea, Stack, Text, Tooltip } from '@mantine/core';
 import { IconChevronDown, IconChevronRight, IconEdit, IconLink, IconPlugConnected, IconPlus, IconTrash } from '@tabler/icons-react';
 import type { ConnectionConfig, IndexSummary } from '../../../shared/types';
@@ -24,6 +24,7 @@ interface ConnectionSidebarProps {
     nodeUrl: string;
     username?: string;
     password?: string;
+    skipTlsVerify?: boolean;
   }) => Promise<void>;
 }
 
@@ -46,9 +47,27 @@ export function ConnectionSidebar({
   const [connectionsCollapsed, setConnectionsCollapsed] = useState(false);
   const [indicesCollapsed, setIndicesCollapsed] = useState(false);
   const [indexKeyword, setIndexKeyword] = useState('');
+  const editorAnchorRef = useRef<HTMLDivElement | null>(null);
   const filteredIndices = indices.filter((index) =>
     index.name.toLowerCase().includes(indexKeyword.trim().toLowerCase())
   );
+
+  useEffect(() => {
+    if (editorOpened && connectionsCollapsed) {
+      setConnectionsCollapsed(false);
+    }
+  }, [connectionsCollapsed, editorOpened]);
+
+  useEffect(() => {
+    if (!editorOpened) {
+      return;
+    }
+
+    editorAnchorRef.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest'
+    });
+  }, [editorOpened, editingConnection]);
 
   return (
     <Stack gap="md" className="sidebar-panel">
@@ -58,28 +77,38 @@ export function ConnectionSidebar({
             <ActionIcon variant="light" color="gray" onClick={() => setConnectionsCollapsed((value) => !value)}>
               {connectionsCollapsed ? <IconChevronRight size={16} /> : <IconChevronDown size={16} />}
             </ActionIcon>
-            <div>
-              <Text fw={700} size="lg">
+            <div className="sidebar-heading">
+              <Text fw={700} size="lg" className="sidebar-heading-title">
                 连接
               </Text>
-              <Text size="sm" c="dimmed">
+              <Text size="sm" c="dimmed" className="sidebar-heading-subtitle">
                 保存常用 Elasticsearch 地址
               </Text>
             </div>
           </Group>
-          <Button leftSection={<IconPlus size={16} />} radius="xl" color="pink" onClick={onAddConnection}>
+          <Button
+            leftSection={<IconPlus size={16} />}
+            radius="xl"
+            color="pink"
+            onClick={() => {
+              setConnectionsCollapsed(false);
+              onAddConnection();
+            }}
+          >
             新增
           </Button>
         </Group>
 
         <Collapse in={!connectionsCollapsed}>
           <Stack gap="md" mt="md">
-            <ConnectionFormPanel
-              opened={editorOpened}
-              editingConnection={editingConnection}
-              onClose={onCloseEditor}
-              onSubmit={onSubmitConnection}
-            />
+            <div ref={editorAnchorRef}>
+              <ConnectionFormPanel
+                opened={editorOpened}
+                editingConnection={editingConnection}
+                onClose={onCloseEditor}
+                onSubmit={onSubmitConnection}
+              />
+            </div>
 
             <ScrollArea h={editorOpened ? 170 : 250} scrollbarSize={6}>
               <Stack gap="sm">
@@ -114,10 +143,15 @@ export function ConnectionSidebar({
                           </Stack>
                           <Group gap={6} wrap="nowrap">
                             <Tooltip label="编辑连接">
-                              <ActionIcon variant="subtle" color="gray" onClick={(event) => {
-                                event.stopPropagation();
-                                onEditConnection(connection);
-                              }}>
+                              <ActionIcon
+                                variant="subtle"
+                                color="gray"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setConnectionsCollapsed(false);
+                                  onEditConnection(connection);
+                                }}
+                              >
                                 <IconEdit size={16} />
                               </ActionIcon>
                             </Tooltip>
@@ -147,11 +181,11 @@ export function ConnectionSidebar({
             <ActionIcon variant="light" color="gray" onClick={() => setIndicesCollapsed((value) => !value)}>
               {indicesCollapsed ? <IconChevronRight size={16} /> : <IconChevronDown size={16} />}
             </ActionIcon>
-            <div>
-              <Text fw={700} size="lg">
+            <div className="sidebar-heading">
+              <Text fw={700} size="lg" className="sidebar-heading-title">
                 索引
               </Text>
-              <Text size="sm" c="dimmed">
+              <Text size="sm" c="dimmed" className="sidebar-heading-subtitle">
                 {selectedConnectionId ? '选择一个索引开始查询' : '先选择连接'}
               </Text>
             </div>

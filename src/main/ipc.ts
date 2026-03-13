@@ -1,6 +1,12 @@
 import { ipcMain } from 'electron';
-import type { ConnectionInput, SearchRequestPayload, UpdateDocumentPayload } from '../shared/types';
-import { fetchIndexFields, fetchIndices, searchDocuments, testEsConnection, updateDocument } from './elasticsearch';
+import type {
+  ConnectionInput,
+  CreateDocumentPayload,
+  DeleteDocumentPayload,
+  SearchRequestPayload,
+  UpdateDocumentPayload
+} from '../shared/types';
+import { createDocument, deleteDocument, fetchIndexFields, fetchIndices, searchDocuments, testEsConnection, updateDocument } from './elasticsearch';
 import { getConnectionById, listConnections, removeConnection, upsertConnection } from './storage';
 
 export function registerIpcHandlers(): void {
@@ -30,8 +36,18 @@ export function registerIpcHandlers(): void {
     return searchDocuments(connection, payload);
   });
 
+  ipcMain.handle('documents:create', async (_, payload: CreateDocumentPayload) => {
+    const connection = await getConnectionById(payload.connectionId);
+    return createDocument(connection, payload.index, payload.id, payload.document);
+  });
+
   ipcMain.handle('documents:update', async (_, payload: UpdateDocumentPayload) => {
     const connection = await getConnectionById(payload.connectionId);
     return updateDocument(connection, payload.index, payload.id, payload.changes);
+  });
+
+  ipcMain.handle('documents:delete', async (_, payload: DeleteDocumentPayload) => {
+    const connection = await getConnectionById(payload.connectionId);
+    return deleteDocument(connection, payload.index, payload.id);
   });
 }

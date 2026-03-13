@@ -1,5 +1,6 @@
 export type QueryMode = 'keyword' | 'json';
-export type FilterOperator = 'contains' | 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists';
+export type FilterOperator = 'contains' | 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'not_exists';
+export type IndexFieldFilterScope = 'standard' | 'nested';
 
 export interface QueryFilter {
   id: string;
@@ -14,6 +15,7 @@ export interface ConnectionConfig {
   nodeUrl: string;
   username?: string;
   password?: string;
+  skipTlsVerify?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -24,6 +26,7 @@ export interface ConnectionInput {
   nodeUrl: string;
   username?: string;
   password?: string;
+  skipTlsVerify?: boolean;
 }
 
 export interface ConnectionTestResult {
@@ -43,6 +46,7 @@ export interface IndexSummary {
 export interface IndexFieldOption {
   name: string;
   type: string;
+  filterScope?: IndexFieldFilterScope;
 }
 
 export interface SearchRequestPayload {
@@ -76,7 +80,26 @@ export interface UpdateDocumentPayload {
   changes: Record<string, PrimitiveValue>;
 }
 
+export interface CreateDocumentPayload {
+  connectionId: string;
+  index: string;
+  id?: string;
+  document: Record<string, PrimitiveValue>;
+}
+
+export interface DeleteDocumentPayload {
+  connectionId: string;
+  index: string;
+  id: string;
+}
+
 export interface SaveDocumentResult {
+  id: string;
+  success: boolean;
+  message?: string;
+}
+
+export interface DeleteDocumentResult {
   id: string;
   success: boolean;
   message?: string;
@@ -90,5 +113,7 @@ export interface EsApi {
   getIndices: (connectionId: string) => Promise<IndexSummary[]>;
   getIndexFields: (connectionId: string, index: string) => Promise<IndexFieldOption[]>;
   searchDocuments: (payload: SearchRequestPayload) => Promise<SearchDocumentsResult>;
+  createDocument: (payload: CreateDocumentPayload) => Promise<SaveDocumentResult>;
   updateDocument: (payload: UpdateDocumentPayload) => Promise<SaveDocumentResult>;
+  deleteDocument: (payload: DeleteDocumentPayload) => Promise<DeleteDocumentResult>;
 }

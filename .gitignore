@@ -1,0 +1,15 @@
+node_modules
+dist
+dist-electron
+out
+release
+.npm-cache
+.DS_Store
+*.log
+*.tsbuildinfo
+.env
+.env.*
+connections.json
+*.local.json
+*.swp
+build/icon-preview.png

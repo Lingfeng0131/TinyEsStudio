@@ -1,0 +1,81 @@
+{
+  "name": "tiny-es-studio",
+  "version": "0.1.0",
+  "description": "一个可爱但专业的 Elasticsearch 桌面端轻量工作台",
+  "main": "./out/main/index.js",
+  "author": "Lingfeng",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "npm run typecheck && electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "dist:mac": "npm run build && electron-builder --mac dmg",
+    "dist:win": "npm run build && electron-builder --win portable --x64"
+  },
+  "dependencies": {
+    "@elastic/elasticsearch": "8.19.1",
+    "@mantine/core": "^8.3.6",
+    "@mantine/hooks": "^8.3.6",
+    "@mantine/notifications": "^8.3.6",
+    "@tabler/icons-react": "^3.35.0",
+    "apache-arrow": "^21.1.0",
+    "react": "^19.2.0",
+    "react-data-grid": "^7.0.0-beta.59",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@swc/core": "^1.13.5",
+    "@types/node": "^24.6.2",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron": "35.7.5",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^5.0.0",
+    "png-to-ico": "^3.0.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.10"
+  },
+  "build": {
+    "appId": "com.lingfeng.tinyesstudio",
+    "productName": "Tiny ES Studio",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-macOS-${arch}.${ext}"
+    },
+    "dmg": {
+      "sign": false
+    },
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
+    }
+  }
+}

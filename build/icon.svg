@@ -1,0 +1,60 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="surface" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(202 154) rotate(36) scale(282 268)">
+      <stop stop-color="#FFD8EC"/>
+      <stop offset="0.34" stop-color="#B6C6FF"/>
+      <stop offset="0.72" stop-color="#82C8FF"/>
+      <stop offset="1" stop-color="#7DE2C9"/>
+    </radialGradient>
+    <linearGradient id="surfaceGlow" x1="152" y1="114" x2="360" y2="382" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.92"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0.16"/>
+    </linearGradient>
+    <linearGradient id="sheet" x1="176" y1="154" x2="312" y2="324" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F4F8FF"/>
+    </linearGradient>
+    <linearGradient id="ring" x1="283" y1="285" x2="382" y2="384" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF73B0"/>
+      <stop offset="1" stop-color="#6A90FF"/>
+    </linearGradient>
+    <filter id="surfaceShadow" x="76" y="84" width="360" height="356" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="24" stdDeviation="22" flood-color="#6D83C8" flood-opacity="0.24"/>
+    </filter>
+    <filter id="sheetShadow" x="142" y="138" width="210" height="226" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="14" stdDeviation="14" flood-color="#7387BC" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <g transform="matrix(1.82 0 0 1.82 -210 -208)">
+    <g filter="url(#surfaceShadow)">
+      <path
+        d="M130 238.111C130 183.925 173.925 140 228.111 140H267.273C322.904 140 368 185.096 368 240.727C368 247.533 367.324 254.181 366.035 260.604C380.97 269.981 390 285.713 390 303.11C390 333.975 364.975 359 334.11 359H212.278C167.391 359 131 322.609 131 277.722C131 264.468 134.172 251.955 139.794 240.9C136.51 239.888 133.237 238.953 130 238.111Z"
+        fill="url(#surface)"
+      />
+      <path
+        d="M184 151.021C202.421 143.459 221.921 140 242.197 140H268.278C299.151 140 326.811 154.976 344.203 178.194C332.999 169.603 319.043 164.512 303.898 164.512H224.782C202.825 164.512 183.245 175.205 170.973 191.7C172.865 177.06 177.246 163.268 184 151.021Z"
+        fill="url(#surfaceGlow)"
+      />
+    </g>
+
+    <g filter="url(#sheetShadow)">
+      <rect x="176" y="156" width="136" height="164" rx="34" fill="url(#sheet)"/>
+    </g>
+
+    <path d="M227 156H279C297.225 156 312 170.775 312 189V210H260C241.775 210 227 195.225 227 177V156Z" fill="#F7F2FF"/>
+    <circle cx="205" cy="212" r="12" fill="#FF8EBC"/>
+    <circle cx="205" cy="244" r="12" fill="#90B7FF"/>
+    <circle cx="205" cy="276" r="12" fill="#8DE0C8"/>
+    <rect x="225" y="202" width="59" height="14" rx="7" fill="#ECEBFF"/>
+    <rect x="225" y="234" width="48" height="14" rx="7" fill="#E8F2FF"/>
+    <rect x="225" y="266" width="63" height="14" rx="7" fill="#E8FAF4"/>
+
+    <circle cx="316" cy="294" r="36" fill="#FFFFFF" fill-opacity="0.92"/>
+    <circle cx="316" cy="294" r="30" stroke="url(#ring)" stroke-width="13"/>
+    <path d="M337 316L360 339" stroke="url(#ring)" stroke-width="16" stroke-linecap="round"/>
+
+    <circle cx="338" cy="196" r="9" fill="#FFFFFF" fill-opacity="0.72"/>
+    <circle cx="162" cy="316" r="7" fill="#FFFFFF" fill-opacity="0.54"/>
+  </g>
+</svg>

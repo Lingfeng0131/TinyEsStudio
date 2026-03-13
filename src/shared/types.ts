@@ -1,0 +1,94 @@
+export type QueryMode = 'keyword' | 'json';
+export type FilterOperator = 'contains' | 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists';
+
+export interface QueryFilter {
+  id: string;
+  field: string;
+  operator: FilterOperator;
+  value?: string;
+}
+
+export interface ConnectionConfig {
+  id: string;
+  name: string;
+  nodeUrl: string;
+  username?: string;
+  password?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConnectionInput {
+  id?: string;
+  name: string;
+  nodeUrl: string;
+  username?: string;
+  password?: string;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+  version?: string;
+  clusterName?: string;
+}
+
+export interface IndexSummary {
+  name: string;
+  docCount?: number;
+  health?: string;
+  status?: string;
+}
+
+export interface IndexFieldOption {
+  name: string;
+  type: string;
+}
+
+export interface SearchRequestPayload {
+  connectionId: string;
+  index: string;
+  mode: QueryMode;
+  keyword?: string;
+  jsonQuery?: string;
+  size?: number;
+  from?: number;
+  filters?: QueryFilter[];
+}
+
+export type PrimitiveValue = string | number | boolean | null;
+
+export interface EsDocument {
+  _id: string;
+  _index: string;
+  _source: Record<string, unknown>;
+}
+
+export interface SearchDocumentsResult {
+  documents: EsDocument[];
+  total: number;
+}
+
+export interface UpdateDocumentPayload {
+  connectionId: string;
+  index: string;
+  id: string;
+  changes: Record<string, PrimitiveValue>;
+}
+
+export interface SaveDocumentResult {
+  id: string;
+  success: boolean;
+  message?: string;
+}
+
+export interface EsApi {
+  listConnections: () => Promise<ConnectionConfig[]>;
+  saveConnection: (payload: ConnectionInput) => Promise<ConnectionConfig[]>;
+  deleteConnection: (id: string) => Promise<ConnectionConfig[]>;
+  testConnection: (connectionId: string) => Promise<ConnectionTestResult>;
+  getIndices: (connectionId: string) => Promise<IndexSummary[]>;
+  getIndexFields: (connectionId: string, index: string) => Promise<IndexFieldOption[]>;
+  searchDocuments: (payload: SearchRequestPayload) => Promise<SearchDocumentsResult>;
+  updateDocument: (payload: UpdateDocumentPayload) => Promise<SaveDocumentResult>;
+}

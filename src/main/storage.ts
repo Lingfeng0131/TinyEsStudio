@@ -53,7 +53,8 @@ function sanitizeConnectionInput(input: ConnectionInput): ConnectionInput {
     name: input.name.trim(),
     nodeUrl: input.nodeUrl.trim(),
     username: input.username?.trim() ?? '',
-    password: input.password ?? ''
+    password: input.password ?? '',
+    skipTlsVerify: Boolean(input.skipTlsVerify)
   };
 }
 
@@ -81,6 +82,7 @@ export async function upsertConnection(input: ConnectionInput): Promise<Connecti
     nodeUrl: sanitized.nodeUrl,
     username: sanitized.username || undefined,
     password: sanitized.password || undefined,
+    skipTlsVerify: sanitized.skipTlsVerify || undefined,
     createdAt: now,
     updatedAt: now
   };

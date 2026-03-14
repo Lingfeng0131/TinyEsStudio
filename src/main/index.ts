@@ -4,7 +4,7 @@ import { registerIpcHandlers } from './ipc';
 import { setupApplicationMenu } from './menu';
 
 app.setName('tiny-es-studio');
-app.setPath('userData', path.join(app.getPath('appData'), app.isPackaged ? 'tiny-es-studio-release' : 'tiny-es-studio-dev'));
+app.setPath('userData', path.join(app.getPath('appData'), app.isPackaged ? 'tiny-es-studio' : 'tiny-es-studio-dev'));
 app.disableHardwareAcceleration();
 
 function createWindow(): void {

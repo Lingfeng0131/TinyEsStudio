@@ -1,82 +1,84 @@
 # Tiny ES Studio
 
-一个可爱但专业的 Elasticsearch 桌面端小工具，适合开发、测试、运维在日常排查时快速查看索引、查询文档、直接编辑数据、执行 DSL。
+[English](./README.md) | [简体中文](./README.zh-CN.md)
 
-它不是重量级管理平台，更像一个顺手的个人工作台：
+Tiny ES Studio is a lightweight yet practical Elasticsearch desktop workspace for developers, testers, and operators who need to inspect indices, query documents, edit data, and run DSL requests quickly.
 
-- 保存多个 Elasticsearch 连接
-- 快速切换集群与索引
-- 表格方式查看、编辑、删除文档
-- 独立 DSL 控制台执行 Elasticsearch 请求
-- 查看索引设置与映射
-- 支持浅色 / 暗黑两套主题
+It is not a heavy management platform. It is designed more like a fast personal workstation:
 
-## 预览
+- Save multiple Elasticsearch connections
+- Switch clusters and indices quickly
+- View, edit, and delete documents in a spreadsheet-like grid
+- Run Elasticsearch requests in a dedicated DSL console
+- Inspect index settings and mappings
+- Toggle between light and dark themes
 
-### 主界面
+## Preview
 
-![主界面](./docs/images/界面1.png)
+### Main Workspace
 
-### 右侧详情面板
+![Main Workspace](./docs/images/界面1.png)
 
-![右侧详情面板](./docs/images/界面2.png)
+### Detail Panel
 
-### 条件筛选查询
+![Detail Panel](./docs/images/界面2.png)
 
-![条件筛选查询](./docs/images/界面3.png)
+### Filtered Query
 
-### DSL 控制台
+![Filtered Query](./docs/images/界面3.png)
 
-![DSL 控制台](./docs/images/界面4.png)
+### DSL Console
 
-## 当前功能
+![DSL Console](./docs/images/界面4.png)
 
-### 连接管理
+## Features
 
-- 新增、编辑、删除 Elasticsearch 连接
-- 本地持久化保存常用连接
-- 手动重新测试连接并刷新索引
-- 顶部明确显示当前连接和当前索引，降低误操作风险
+### Connection Management
 
-### 索引与查询
+- Add, edit, and delete Elasticsearch connections
+- Persist commonly used connections locally
+- Re-test connections manually and refresh indices
+- Clearly display the current connection and selected index to reduce mistakes
 
-- 左侧索引列表支持快速筛选
-- 关键词查询支持全文片段搜索与 `_id` 命中
-- 条件筛选支持 `AND / OR`
-- 支持分页查询
-- 可查看当前索引的 `settings` 和 `mappings`
+### Index Browsing and Querying
 
-### 表格增删改查
+- Filter indices quickly from the left sidebar
+- Search by full-text keyword fragments or exact `_id`
+- Combine conditions with `AND / OR`
+- Support paginated queries
+- View current index `settings` and `mappings`
 
-- 查询结果使用接近 Excel 的表格展示
-- 支持直接新增草稿行并保存到 ES
-- 支持编辑已有文档并按字段增量保存
-- 支持多选后批量删除
-- 支持在详情区查看当前文档原始 JSON
-- 时间字段会根据列内已有值和 mapping 格式给出快捷补全
+### Document CRUD in Grid
 
-### DSL 控制台
+- Display query results in an Excel-like table
+- Create draft rows and save them directly to Elasticsearch
+- Edit existing documents and save changed fields incrementally
+- Delete multiple selected documents in batch
+- Inspect the raw JSON of the current document in the detail panel
+- Offer quick autofill for date fields based on existing values and mapping formats
 
-- 独立工作区，不和表格查询混在一起
-- 支持执行 Elasticsearch 常见 REST 请求
-- 返回原始 JSON 响应
-- 支持复制完整响应结果
-- 编辑器支持基础补全：
-  - HTTP 方法
-  - 常见 ES API 路径
-  - 当前连接下索引名
-  - 当前索引字段名
-  - 常用查询片段与模板
+### DSL Console
 
-### 界面体验
+- Separate workspace instead of mixing with table queries
+- Run common Elasticsearch REST requests
+- Return raw JSON responses
+- Copy the full response easily
+- Monaco editor includes basic suggestions for:
+  - HTTP methods
+  - Common Elasticsearch API paths
+  - Index names under the current connection
+  - Field names from the current index
+  - Common query snippets and templates
 
-- 粉白主题为默认风格
-- 支持一键切换暗黑模式
-- 右侧详情面板支持收起与放大
-- 表格支持横向与纵向滚动
-- 全局通知已适配浅色 / 暗黑主题
+### UI Experience
 
-## 技术栈
+- Pink-and-white theme as the default style
+- One-click dark mode toggle
+- Collapsible and resizable detail panel
+- Horizontal and vertical scrolling for large tables
+- Notifications adapted for both light and dark themes
+
+## Tech Stack
 
 - Electron
 - React 19
@@ -84,68 +86,68 @@
 - Mantine
 - react-data-grid
 - Monaco Editor
-- @elastic/elasticsearch
+- `@elastic/elasticsearch`
 - electron-vite
 
-## 快速开始
+## Quick Start
 
-### 安装依赖
+### Install Dependencies
 
 ```bash
 npm install
 ```
 
-### 启动开发环境
+### Start Development
 
 ```bash
 npm run dev
 ```
 
-### 类型检查
+### Run Type Check
 
 ```bash
 npm run typecheck
 ```
 
-### 构建
+### Build
 
 ```bash
 npm run build
 ```
 
-### 打包
+### Package
 
 ```bash
 npm run dist:mac
 npm run dist:win
 ```
 
-默认产物输出到 `release/` 目录：
+Build artifacts are generated in the `release/` directory by default:
 
-- macOS：`Tiny ES Studio-<version>-macOS-arm64.dmg`
-- Windows：`Tiny ES Studio-<version>-win-x64.exe`
+- macOS: `Tiny ES Studio-0.1.0-macOS-arm64.dmg`
+- Windows: `Tiny ES Studio-0.1.0-win-x64.exe`
 
-## 使用说明
+## Usage
 
-### 1. 添加连接
+### 1. Add a Connection
 
-在左侧连接面板新增 Elasticsearch 地址，可选填写用户名、密码和 TLS 设置。
+Create an Elasticsearch connection from the left sidebar. Username, password, and TLS settings are optional.
 
-### 2. 选择索引
+### 2. Choose an Index
 
-连接成功后会自动加载索引列表。可以先筛索引，再进入查询或 DSL 操作。
+After a successful connection, the app loads the index list automatically. You can filter indices before switching to table queries or DSL operations.
 
-### 3. 表格模式
+### 3. Table Mode
 
-- 输入关键词后执行查询
-- 需要更精确时可叠加条件筛选
-- 直接点击单元格编辑
-- 新增、保存、删除都在结果表格上方工具栏完成
+- Enter a keyword and run a search
+- Add filter conditions when you need more precise matching
+- Click a cell directly to edit
+- Use the toolbar above the result grid to add, save, or delete documents
 
-### 4. DSL 模式
+### 4. DSL Mode
 
-- 点击右上角 DSL 按钮切换到独立控制台
-- 第一行输入方法和路径，例如：
+- Click the `DSL` button in the top-right corner to open the dedicated console
+- Enter the method and path on the first line, for example:
 
 ```http
 GET /user_index/_search
@@ -156,30 +158,31 @@ GET /user_index/_search
 }
 ```
 
-- 点击“执行”即可查看原始 JSON 响应
+- Click `Run` to inspect the raw JSON response
 
-## 项目结构
+## Project Structure
 
 ```text
 .
 ├─ src/
-│  ├─ main/        # Electron 主进程，负责连接、查询、保存、删除等逻辑
-│  ├─ preload/     # 渲染进程桥接 API
-│  ├─ renderer/    # React 界面
-│  └─ shared/      # 主进程与渲染进程共享类型
-├─ docs/images/    # README 截图
-├─ build/          # 打包图标资源
+│  ├─ main/        # Electron main process for connect/query/save/delete logic
+│  ├─ preload/     # Bridge APIs exposed to the renderer process
+│  ├─ renderer/    # React UI
+│  └─ shared/      # Shared types between main and renderer
+├─ docs/images/    # Screenshots used in the README
+├─ build/          # Packaging icons and resources
 ├─ electron.vite.config.ts
 ├─ package.json
-└─ README.md
+├─ README.md
+└─ README.zh-CN.md
 ```
 
-## 本地数据说明
+## Local Data Notes
 
-- 连接配置保存在 Electron `userData` 目录
-- 仓库内不包含任何真实连接信息
-- 当前版本更适合个人开发环境或受控测试环境
-- 如果后续用于长期正式场景，建议接入系统钥匙串或更安全的凭据存储方案
+- Connection settings are stored under Electron's `userData` directory
+- The repository does not contain any real connection credentials
+- The current version is better suited for personal development or controlled test environments
+- For long-term production usage, integrating with the system keychain or a safer credential store is recommended
 
 ## License
 

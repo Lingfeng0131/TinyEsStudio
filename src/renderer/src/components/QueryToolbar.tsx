@@ -7,15 +7,13 @@ import {
   Collapse,
   Group,
   NumberInput,
-  SegmentedControl,
   Stack,
   Text,
   TextInput,
-  Textarea,
   Tooltip
 } from '@mantine/core';
 import { IconFilterPlus, IconRefresh, IconRestore, IconSearch, IconTrash, IconX } from '@tabler/icons-react';
-import type { ConnectionConfig, FilterOperator, IndexFieldOption, QueryFilter, QueryMode } from '../../../shared/types';
+import type { ConnectionConfig, FilterJoinMode, FilterOperator, IndexFieldOption, QueryFilter } from '../../../shared/types';
 import { getAllowedFilterOperators, isFilterFieldSupported } from '../../../shared/filtering';
 
 interface QueryToolbarProps {
@@ -23,26 +21,26 @@ interface QueryToolbarProps {
   selectedIndex?: string;
   collapsed: boolean;
   compactMode: boolean;
-  queryMode: QueryMode;
   keyword: string;
-  jsonQuery: string;
   filters: QueryFilter[];
+  filterJoinMode: FilterJoinMode;
   indexFields: IndexFieldOption[];
   size: number;
   querying: boolean;
+  loadingIndexMetadata: boolean;
   dirtyCount: number;
   total: number;
-  onChangeMode: (mode: QueryMode) => void;
   onChangeKeyword: (value: string) => void;
-  onChangeJsonQuery: (value: string) => void;
   onAddFilter: () => void;
   onClearFilters: () => void;
+  onChangeFilterJoinMode: (value: FilterJoinMode) => void;
   onUpdateFilter: (id: string, patch: Partial<QueryFilter>) => void;
   onRemoveFilter: (id: string) => void;
   onChangeSize: (value: number) => void;
   onSearch: () => void;
   onRefresh: () => void;
   onReset: () => void;
+  onOpenIndexMetadata: () => void;
   onToggleCollapsed: () => void;
 }
 
@@ -62,61 +60,49 @@ export function QueryToolbar({
   selectedIndex,
   collapsed,
   compactMode,
-  queryMode,
   keyword,
-  jsonQuery,
   filters,
+  filterJoinMode,
   indexFields,
   size,
   querying,
+  loadingIndexMetadata,
   dirtyCount,
   total,
-  onChangeMode,
   onChangeKeyword,
-  onChangeJsonQuery,
   onAddFilter,
   onClearFilters,
+  onChangeFilterJoinMode,
   onUpdateFilter,
   onRemoveFilter,
   onChangeSize,
   onSearch,
   onRefresh,
   onReset,
+  onOpenIndexMetadata,
   onToggleCollapsed
 }: QueryToolbarProps) {
   const handleKeywordChange = (event: ChangeEvent<HTMLInputElement>): void => {
     onChangeKeyword(event.currentTarget.value);
   };
 
-  const handleJsonChange = (event: ChangeEvent<HTMLTextAreaElement>): void => {
-    onChangeJsonQuery(event.currentTarget.value);
-  };
-
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const indexFieldMap = indexFields.reduce<Record<string, IndexFieldOption>>((accumulator, field) => {
     accumulator[field.name] = field;
     return accumulator;
   }, {});
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const activeFilterCount = filters.filter((filter) => filter.field.trim()).length;
-  const collapsedSummary =
-    queryMode === 'json'
-      ? 'JSON 查询'
-      : keyword.trim()
-        ? `关键词：${keyword.trim()}`
-        : activeFilterCount > 0
-          ? `已配置 ${activeFilterCount} 个筛选条件`
-          : '未设置查询条件';
+  const collapsedSummary = keyword.trim()
+    ? `关键词：${keyword.trim()}`
+    : activeFilterCount > 0
+      ? `已配置 ${activeFilterCount} 个${filterJoinMode === 'or' ? ' OR ' : ' AND '}条件`
+      : '未设置查询条件';
 
   useEffect(() => {
-    if (queryMode === 'json') {
-      setFiltersExpanded(false);
-      return;
-    }
-
     if (activeFilterCount > 0) {
       setFiltersExpanded(true);
     }
-  }, [activeFilterCount, queryMode]);
+  }, [activeFilterCount]);
 
   return (
     <Card
@@ -130,15 +116,6 @@ export function QueryToolbar({
             <Button size="xs" variant="subtle" color="gray" className="toolbar-collapse-toggle" onClick={onToggleCollapsed}>
               {compactMode ? '展开查询' : '展开查询面板'}
             </Button>
-            <SegmentedControl
-              radius="xl"
-              value={queryMode}
-              onChange={(value) => onChangeMode(value as QueryMode)}
-              data={[
-                { label: '关键词', value: 'keyword' },
-                { label: 'JSON', value: 'json' }
-              ]}
-            />
             <div className="size-inline-field">
               <Text size="sm" fw={600} className="size-inline-label">
                 每页
@@ -154,28 +131,34 @@ export function QueryToolbar({
                 className="size-input"
               />
             </div>
-            {queryMode === 'keyword' ? (
-              <Button
-                size="sm"
-                variant={filtersExpanded ? 'light' : 'subtle'}
-                color={activeFilterCount > 0 ? 'pink' : 'gray'}
-                className="toolbar-filter-toggle"
-                leftSection={<IconFilterPlus size={14} />}
-                onClick={() => {
-                  onToggleCollapsed();
-                  setFiltersExpanded(true);
-                }}
-              >
-                {compactMode ? '筛选' : '展开筛选'}
-                {activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-              </Button>
-            ) : null}
+            <Button
+              size="sm"
+              variant={activeFilterCount > 0 ? 'light' : 'subtle'}
+              color={activeFilterCount > 0 ? 'pink' : 'gray'}
+              className="toolbar-filter-toggle"
+              leftSection={<IconFilterPlus size={14} />}
+              onClick={onToggleCollapsed}
+            >
+              {compactMode ? '筛选' : '展开筛选'}
+              {activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
+            </Button>
             <Text size="sm" c="dimmed" className="toolbar-collapsed-summary">
               {collapsedSummary}
             </Text>
           </Group>
 
           <Group gap="xs" wrap="nowrap" className="toolbar-action-strip toolbar-action-strip-compact">
+            <Button
+              size="xs"
+              variant="subtle"
+              color="pink"
+              className="toolbar-collapse-toggle"
+              disabled={!selectedIndex}
+              loading={loadingIndexMetadata}
+              onClick={onOpenIndexMetadata}
+            >
+              索引信息
+            </Button>
             <Tooltip label="重置查询条件" withArrow>
               <ActionIcon
                 radius="xl"
@@ -224,12 +207,23 @@ export function QueryToolbar({
               </Text>
             </Stack>
             <Group gap="xs">
-              <Badge radius="xl" color="blue" variant="light">
+              <Badge radius="xl" color="pink" variant="light">
                 总命中 {total}
               </Badge>
               <Badge radius="xl" color={dirtyCount > 0 ? 'pink' : 'gray'} variant="light">
                 已修改 {dirtyCount}
               </Badge>
+              <Button
+                size="xs"
+                variant="subtle"
+                color="pink"
+                className="toolbar-collapse-toggle"
+                disabled={!selectedIndex}
+                loading={loadingIndexMetadata}
+                onClick={onOpenIndexMetadata}
+              >
+                索引信息
+              </Button>
               <Button size="xs" variant="subtle" color="gray" className="toolbar-collapse-toggle" onClick={onToggleCollapsed}>
                 {compactMode ? '收起查询' : '收起查询面板'}
               </Button>
@@ -240,15 +234,6 @@ export function QueryToolbar({
             <Stack gap="sm">
               <Group justify="space-between" align="center" wrap="wrap" className="toolbar-primary-row">
                 <Group align="center" gap="sm" wrap="wrap" className="toolbar-primary-controls">
-                  <SegmentedControl
-                    radius="xl"
-                    value={queryMode}
-                    onChange={(value) => onChangeMode(value as QueryMode)}
-                    data={[
-                      { label: '关键词', value: 'keyword' },
-                      { label: 'JSON', value: 'json' }
-                    ]}
-                  />
                   <div className="size-inline-field">
                     <Text size="sm" fw={600} className="size-inline-label">
                       每页
@@ -264,21 +249,16 @@ export function QueryToolbar({
                       className="size-input"
                     />
                   </div>
-                  {queryMode === 'keyword' ? (
-                    <Button
-                      size="sm"
-                      variant={filtersExpanded ? 'light' : 'subtle'}
-                      color={activeFilterCount > 0 ? 'pink' : 'gray'}
-                      className="toolbar-filter-toggle"
-                      leftSection={<IconFilterPlus size={14} />}
-                      onClick={() => {
-                        setFiltersExpanded((current) => !current);
-                      }}
-                    >
-                      {filtersExpanded ? '收起筛选' : compactMode ? '筛选' : '展开筛选'}
-                      {activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
-                    </Button>
-                  ) : null}
+                  <Button
+                    size="sm"
+                    variant={activeFilterCount > 0 ? 'light' : 'subtle'}
+                    color={activeFilterCount > 0 ? 'pink' : 'gray'}
+                    className="toolbar-filter-toggle"
+                    leftSection={<IconFilterPlus size={14} />}
+                    onClick={() => setFiltersExpanded((current) => !current)}
+                  >
+                    {activeFilterCount > 0 ? `筛选 (${activeFilterCount})` : '筛选'}
+                  </Button>
                 </Group>
 
                 <Group gap="xs" wrap="nowrap" className="toolbar-action-strip toolbar-action-strip-compact">
@@ -321,53 +301,70 @@ export function QueryToolbar({
                 </Group>
               </Group>
 
-              {queryMode === 'keyword' ? (
-                <Stack gap={6} className="toolbar-query-shell">
-                  <TextInput
-                    label="关键词查询"
-                    placeholder="例如：姓名、手机号、订单号、邮箱片段"
-                    value={keyword}
-                    onChange={handleKeywordChange}
-                  />
-                  <Text size="xs" c="dimmed">
-                    会尝试在所有字段里做全文匹配和模糊包含匹配，适合直接输你能看到的字段内容片段。
-                  </Text>
+              <Stack gap={6} className="toolbar-query-shell">
+                <TextInput
+                  label="关键词查询"
+                  placeholder="例如：姓名、手机号、订单号、邮箱片段"
+                  value={keyword}
+                  onChange={handleKeywordChange}
+                />
+                <Text size="xs" c="dimmed">
+                  会尝试在所有字段里做全文匹配和模糊包含匹配，适合直接输你能看到的字段内容片段。
+                </Text>
 
-                  <Collapse in={filtersExpanded}>
-                    <div className="filter-section filter-section-compact">
-                      <Group justify="space-between" align="center" mb="xs">
-                        <div>
-                          <Text fw={700} size="sm">
-                            条件筛选
-                          </Text>
-                          <Text size="xs" c="dimmed">
-                            支持多条件 AND 筛选，例如 `status = paid`、`amount &gt; 100`
-                          </Text>
-                        </div>
-                        <Group gap="xs">
+                <Collapse in={filtersExpanded}>
+                  <div className="filter-section filter-section-compact">
+                    <Group justify="space-between" align="center" mb="xs">
+                      <div>
+                        <Text fw={700} size="sm">
+                          条件筛选
+                        </Text>
+                        <Text size="xs" c="dimmed">
+                          支持整组条件按 AND / OR 组合，例如 `status = paid`、`amount &gt; 100`
+                        </Text>
+                      </div>
+                      <Group gap="xs">
+                        <Group gap={6} className="filter-join-toggle">
                           <Button
                             size="xs"
-                            variant="subtle"
-                            color="gray"
-                            leftSection={<IconX size={14} />}
-                            onClick={onClearFilters}
+                            variant={filterJoinMode === 'and' ? 'light' : 'subtle'}
+                            color={filterJoinMode === 'and' ? 'pink' : 'gray'}
+                            onClick={() => onChangeFilterJoinMode('and')}
                           >
-                            清空条件
+                            AND
                           </Button>
                           <Button
                             size="xs"
-                            variant="light"
-                            color="pink"
-                            leftSection={<IconFilterPlus size={14} />}
-                            onClick={onAddFilter}
+                            variant={filterJoinMode === 'or' ? 'light' : 'subtle'}
+                            color={filterJoinMode === 'or' ? 'pink' : 'gray'}
+                            onClick={() => onChangeFilterJoinMode('or')}
                           >
-                            添加条件
+                            OR
                           </Button>
                         </Group>
+                        <Button
+                          size="xs"
+                          variant="subtle"
+                          color="gray"
+                          leftSection={<IconX size={14} />}
+                          onClick={onClearFilters}
+                        >
+                          清空条件
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="light"
+                          color="pink"
+                          leftSection={<IconFilterPlus size={14} />}
+                          onClick={onAddFilter}
+                        >
+                          添加条件
+                        </Button>
                       </Group>
+                    </Group>
 
-                      <div className="filter-list-shell">
-                        <Stack gap="sm" className="filter-list">
+                    <div className="filter-list-shell">
+                      <Stack gap="sm" className="filter-list">
                         {filters.map((filter) => {
                           const selectedField = indexFieldMap[filter.field];
                           const allowedOperators = getAllowedFilterOperators(selectedField);
@@ -453,22 +450,11 @@ export function QueryToolbar({
                             </div>
                           );
                         })}
-                        </Stack>
-                      </div>
+                      </Stack>
                     </div>
-                  </Collapse>
-                </Stack>
-              ) : (
-                <Textarea
-                  label="JSON 查询"
-                  placeholder='例如：{"query":{"match":{"status":"online"}}}'
-                  value={jsonQuery}
-                  onChange={handleJsonChange}
-                  autosize
-                  minRows={4}
-                  maxRows={7}
-                />
-              )}
+                  </div>
+                </Collapse>
+              </Stack>
             </Stack>
           </div>
         </Stack>

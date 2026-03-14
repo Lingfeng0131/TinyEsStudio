@@ -3,10 +3,21 @@ import type {
   ConnectionInput,
   CreateDocumentPayload,
   DeleteDocumentPayload,
+  ExecuteDslRequestPayload,
   SearchRequestPayload,
   UpdateDocumentPayload
 } from '../shared/types';
-import { createDocument, deleteDocument, fetchIndexFields, fetchIndices, searchDocuments, testEsConnection, updateDocument } from './elasticsearch';
+import {
+  createDocument,
+  deleteDocument,
+  executeDslRequest,
+  fetchIndexFields,
+  fetchIndexMetadata,
+  fetchIndices,
+  searchDocuments,
+  testEsConnection,
+  updateDocument
+} from './elasticsearch';
 import { getConnectionById, listConnections, removeConnection, upsertConnection } from './storage';
 
 export function registerIpcHandlers(): void {
@@ -31,9 +42,19 @@ export function registerIpcHandlers(): void {
     return fetchIndexFields(connection, index);
   });
 
+  ipcMain.handle('indices:metadata', async (_, connectionId: string, index: string) => {
+    const connection = await getConnectionById(connectionId);
+    return fetchIndexMetadata(connection, index);
+  });
+
   ipcMain.handle('documents:search', async (_, payload: SearchRequestPayload) => {
     const connection = await getConnectionById(payload.connectionId);
     return searchDocuments(connection, payload);
+  });
+
+  ipcMain.handle('dsl:execute', async (_, payload: ExecuteDslRequestPayload) => {
+    const connection = await getConnectionById(payload.connectionId);
+    return executeDslRequest(connection, payload);
   });
 
   ipcMain.handle('documents:create', async (_, payload: CreateDocumentPayload) => {

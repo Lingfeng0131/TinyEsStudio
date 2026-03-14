@@ -1,18 +1,20 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionIcon,
   AppShell,
   Button,
   Card,
   Group,
+  Loader,
   MantineProvider,
+  Modal,
   Stack,
   Text,
   Tooltip,
   UnstyledButton,
   createTheme
 } from '@mantine/core';
-import { Notifications, notifications } from '@mantine/notifications';
+import { Notifications } from '@mantine/notifications';
 import {
   IconDeviceFloppy,
   IconPlus,
@@ -20,34 +22,41 @@ import {
   IconChevronsRight,
   IconChevronLeft,
   IconChevronRight,
-  IconHeartHandshake,
   IconLayoutSidebarRightCollapse,
   IconLayoutSidebarRightExpand,
+  IconInfoCircle,
+  IconMoonStars,
   IconPlugConnected,
+  IconSunHigh,
+  IconTerminal2,
+  IconTable,
   IconTrash
 } from '@tabler/icons-react';
 import type {
   ConnectionConfig,
   ConnectionInput,
   EsDocument,
+  FilterJoinMode,
   IndexFieldOption,
+  IndexMetadataResult,
   IndexSummary,
   QueryFilter,
-  QueryMode,
   SaveDocumentResult
 } from '../../shared/types';
 import { ConnectionSidebar } from './components/ConnectionSidebar';
+import { DslWorkspace } from './components/DslWorkspace';
 import { DocumentsGrid } from './components/DocumentsGrid';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { JsonDetailPanel } from './components/JsonDetailPanel';
 import { QueryToolbar } from './components/QueryToolbar';
+import appIcon from './assets/app-icon.png';
 import type { DirtyState, GridRow } from './types';
+import { showAppNotification } from './utils/appNotifications';
 import {
   applyChangesToDocumentSource,
   buildDocumentFromGridRow,
   collectFieldNames,
   getPrimitiveValueByPath,
-  normalizeCellValue,
   toGridRows
 } from './utils/documentTable';
 
@@ -57,8 +66,8 @@ const theme = createTheme({
   defaultRadius: 'xl',
   colors: {
     pink: ['#fff0f4', '#ffe0ea', '#ffcade', '#ffb1cf', '#ff95bc', '#ff7eae', '#ff6ca4', '#ef4b8a', '#d93a79', '#b32866'],
-    blue: ['#eef6ff', '#daeaff', '#bfdcff', '#9ac7ff', '#72afff', '#529aff', '#3f8eff', '#2477ea', '#1763d0', '#0a4ca9'],
-    mint: ['#eefaf7', '#dcf2eb', '#bce7da', '#95dbc7', '#6ccfb4', '#50c7a7', '#41c39f', '#2dae88', '#1e9776', '#107e63']
+    blue: ['#fff3f7', '#ffe6ef', '#ffd3e4', '#ffbdd6', '#ffa2c3', '#ff8cb4', '#ff79a7', '#ef5d93', '#d9477f', '#bf316a'],
+    mint: ['#fff7fa', '#ffedf4', '#ffdce9', '#ffc8dd', '#ffb0cf', '#ff9bc2', '#ff89b7', '#ea6fa0', '#cf5a8b', '#b24675']
   },
   components: {
     Button: {
@@ -89,6 +98,9 @@ const theme = createTheme({
   }
 });
 
+const APP_VERSION = '0.1.0';
+const APP_AUTHOR = 'Lingfeng';
+
 function normalizeConnectionTestMessage(message: string): string {
   if (
     message.includes('self-signed certificate') ||
@@ -117,23 +129,64 @@ function normalizeUiErrorMessage(message: string): string {
   return normalizeConnectionTestMessage(message);
 }
 
-const defaultJsonQuery = '{\n  "query": {\n    "match_all": {}\n  }\n}';
+function buildDefaultDslRequest(index?: string): string {
+  if (!index) {
+    return 'GET /_cluster/health';
+  }
 
-function showAppNotification(options: {
-  id: string;
-  color: string;
-  title: string;
-  message: string;
-  autoClose?: number;
-}): void {
-  notifications.hide(options.id);
-  notifications.show({
-    ...options,
-    autoClose: options.autoClose ?? 1800
-  });
+  return `GET /${index}/_search\n\n{\n  "query": {\n    "match_all": {}\n  },\n  "size": 50\n}`;
 }
 
-function AppContent() {
+type DetailTab = 'document' | 'settings' | 'mapping';
+type WorkspaceMode = 'table' | 'dsl';
+type ThemeMode = 'light' | 'dark';
+const THEME_STORAGE_KEY = 'tiny-es-studio-theme-mode';
+
+function parseDslRequestText(requestText: string): {
+  method: string;
+  path: string;
+  bodyText?: string;
+} {
+  const normalizedLines = requestText.replace(/\r\n/g, '\n').split('\n');
+  const firstLine = normalizedLines.find((line) => line.trim());
+
+  if (!firstLine) {
+    throw new Error('请先输入 DSL 请求，第一行格式示例：GET /_cluster/health');
+  }
+
+  const requestLineMatch = firstLine.trim().match(/^([A-Za-z]+)\s+(\S+)$/);
+
+  if (!requestLineMatch) {
+    throw new Error('第一行请使用“请求方法 路径”的格式，例如：GET /user_index/_search');
+  }
+
+  const [, method, rawPath] = requestLineMatch;
+  const firstLineIndex = normalizedLines.findIndex((line) => line === firstLine);
+  const bodyLines = normalizedLines.slice(firstLineIndex + 1);
+  const bodyText = bodyLines.join('\n').trim();
+
+  if (bodyText) {
+    try {
+      JSON.parse(bodyText);
+    } catch {
+      throw new Error('请求体不是合法 JSON');
+    }
+  }
+
+  return {
+    method: method.toUpperCase(),
+    path: rawPath.startsWith('/') ? rawPath : `/${rawPath}`,
+    ...(bodyText ? { bodyText } : {})
+  };
+}
+
+function AppContent({
+  themeMode,
+  onToggleTheme
+}: {
+  themeMode: ThemeMode;
+  onToggleTheme: () => void;
+}) {
   const createFilter = (): QueryFilter => ({
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     field: '',
@@ -146,31 +199,44 @@ function AppContent() {
   const [selectedIndex, setSelectedIndex] = useState<string>();
   const [indices, setIndices] = useState<IndexSummary[]>([]);
   const [indexFields, setIndexFields] = useState<IndexFieldOption[]>([]);
+  const [indexMetadata, setIndexMetadata] = useState<IndexMetadataResult>();
+  const [loadingIndexMetadata, setLoadingIndexMetadata] = useState(false);
   const [loadingIndices, setLoadingIndices] = useState(false);
   const [querying, setQuerying] = useState(false);
+  const [dslExecuting, setDslExecuting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [queryMode, setQueryMode] = useState<QueryMode>('keyword');
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('table');
   const [keyword, setKeyword] = useState('');
-  const [jsonQuery, setJsonQuery] = useState('{\n  "query": {\n    "match_all": {}\n  }\n}');
+  const [dslRequest, setDslRequest] = useState(buildDefaultDslRequest());
+  const [dslResponse, setDslResponse] = useState('');
+  const [dslStatusCode, setDslStatusCode] = useState<number>();
   const [filters, setFilters] = useState<QueryFilter[]>([createFilter()]);
+  const [filterJoinMode, setFilterJoinMode] = useState<FilterJoinMode>('and');
   const [size, setSize] = useState(50);
   const [documents, setDocuments] = useState<EsDocument[]>([]);
   const [rows, setRows] = useState<GridRow[]>([]);
   const [dirtyState, setDirtyState] = useState<DirtyState>({});
   const [selectedRowKey, setSelectedRowKey] = useState<string>();
-  const [checkedRowKey, setCheckedRowKey] = useState<string>();
+  const [checkedRowKeys, setCheckedRowKeys] = useState<string[]>([]);
   const [gridScrollToTopSignal, setGridScrollToTopSignal] = useState(0);
   const [editorOpened, setEditorOpened] = useState(false);
   const [editingConnection, setEditingConnection] = useState<ConnectionConfig | null>(null);
   const [searchTotal, setSearchTotal] = useState(0);
   const [detailCollapsed, setDetailCollapsed] = useState(true);
+  const [detailTab, setDetailTab] = useState<DetailTab>('document');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [queryPanelCollapsed, setQueryPanelCollapsed] = useState(false);
+  const [aboutOpened, setAboutOpened] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [viewportWidth, setViewportWidth] = useState(() =>
     typeof window === 'undefined' ? 1440 : window.innerWidth
   );
+  const indicesRequestSeqRef = useRef(0);
+  const indexFieldsRequestSeqRef = useRef(0);
+  const indexMetadataRequestSeqRef = useRef(0);
+  const searchRequestSeqRef = useRef(0);
+  const dslRequestSeqRef = useRef(0);
 
   const selectedConnection = useMemo(
     () => connections.find((item) => item.id === selectedConnectionId),
@@ -187,20 +253,33 @@ function AppContent() {
     [rows, selectedRowKey]
   );
 
-  const checkedDocument = useMemo(
-    () => documents.find((item) => `${item._index}:${item._id}` === checkedRowKey),
-    [checkedRowKey, documents]
+  const checkedRowKeySet = useMemo(() => new Set(checkedRowKeys), [checkedRowKeys]);
+
+  const checkedDocuments = useMemo(
+    () => documents.filter((item) => checkedRowKeySet.has(`${item._index}:${item._id}`)),
+    [checkedRowKeySet, documents]
   );
 
-  const checkedDraftRow = useMemo(
-    () => rows.find((item) => item._rowKey === checkedRowKey && item._isDraft),
-    [checkedRowKey, rows]
+  const checkedDraftRows = useMemo(
+    () => rows.filter((item) => item._isDraft && checkedRowKeySet.has(item._rowKey)),
+    [checkedRowKeySet, rows]
   );
 
   const fieldTypeMap = useMemo(
     () =>
       indexFields.reduce<Record<string, string>>((accumulator, field) => {
         accumulator[field.name] = field.type;
+        return accumulator;
+      }, {}),
+    [indexFields]
+  );
+
+  const fieldFormatMap = useMemo(
+    () =>
+      indexFields.reduce<Record<string, string>>((accumulator, field) => {
+        if (field.format) {
+          accumulator[field.name] = field.format;
+        }
         return accumulator;
       }, {}),
     [indexFields]
@@ -215,6 +294,22 @@ function AppContent() {
     });
     return Array.from(fieldSet).sort((a, b) => a.localeCompare(b, 'zh-CN'));
   }, [documents, indexFields]);
+
+  const fieldDateFormatHintMap = useMemo(
+    () =>
+      displayFields.reduce<Record<string, string>>((accumulator, field) => {
+        const sampleValue = documents
+          .map((document) => getPrimitiveValueByPath(document._source, field))
+          .find((value) => typeof value === 'string' && value.trim().length > 0);
+
+        if (typeof sampleValue === 'string' && sampleValue.trim()) {
+          accumulator[field] = sampleValue.trim();
+        }
+
+        return accumulator;
+      }, {}),
+    [displayFields, documents]
+  );
 
   const draftRows = useMemo(() => rows.filter((row) => row._isDraft), [rows]);
 
@@ -231,13 +326,11 @@ function AppContent() {
 
   const canDelete = useMemo(
     () =>
-      Boolean(selectedRowKey) &&
-      selectedRowKey === checkedRowKey &&
-      Boolean(selectedDocument || checkedDraftRow) &&
+      checkedRowKeys.length > 0 &&
       !querying &&
       !saving &&
       !deleting,
-    [checkedDraftRow, checkedRowKey, deleting, querying, saving, selectedDocument, selectedRowKey]
+    [checkedRowKeys.length, deleting, querying, saving]
   );
 
   const totalPages = useMemo(() => {
@@ -277,10 +370,16 @@ function AppContent() {
       setSidebarCollapsed(true);
     }
 
-    if (viewportWidth < 1200 && !queryPanelCollapsed) {
+    if (viewportWidth < 1200 && workspaceMode === 'table' && !queryPanelCollapsed) {
       setQueryPanelCollapsed(true);
     }
-  }, [queryPanelCollapsed, sidebarCollapsed, viewportWidth]);
+  }, [queryPanelCollapsed, sidebarCollapsed, viewportWidth, workspaceMode]);
+
+  useEffect(() => {
+    if (workspaceMode === 'dsl' && !detailCollapsed) {
+      setDetailCollapsed(true);
+    }
+  }, [detailCollapsed, workspaceMode]);
 
   useEffect(() => {
     void loadConnections();
@@ -292,14 +391,28 @@ function AppContent() {
       return;
     }
 
+    indicesRequestSeqRef.current += 1;
+    indexFieldsRequestSeqRef.current += 1;
+    indexMetadataRequestSeqRef.current += 1;
+    searchRequestSeqRef.current += 1;
+    dslRequestSeqRef.current += 1;
+    setLoadingIndices(false);
+    setLoadingIndexMetadata(false);
+    setQuerying(false);
+    setDslExecuting(false);
     setIndices([]);
     setSelectedIndex(undefined);
     setIndexFields([]);
+    setIndexMetadata(undefined);
   }, [selectedConnection]);
 
   useEffect(() => {
     if (!selectedConnectionId || !selectedIndex) {
+      indexFieldsRequestSeqRef.current += 1;
+      indexMetadataRequestSeqRef.current += 1;
+      setLoadingIndexMetadata(false);
       setIndexFields([]);
+      setIndexMetadata(undefined);
       setFilters((current) =>
         current.map((item) => ({
           ...item,
@@ -310,13 +423,13 @@ function AppContent() {
     }
 
     void loadIndexFields(selectedConnectionId, selectedIndex);
+    void loadIndexMetadata(selectedConnectionId, selectedIndex);
   }, [selectedConnectionId, selectedIndex]);
 
   function resetQueryControls(): void {
-    setQueryMode('keyword');
     setKeyword('');
-    setJsonQuery(defaultJsonQuery);
     setFilters([createFilter()]);
+    setFilterJoinMode('and');
     setSize(50);
     setCurrentPage(1);
     setQueryPanelCollapsed(false);
@@ -349,11 +462,15 @@ function AppContent() {
       setConnections(data);
       const nextId = payload.id ?? data.find((item) => item.name === payload.name && item.nodeUrl === payload.nodeUrl)?.id;
       if (nextId) {
+        if (nextId !== selectedConnectionId) {
+          clearSearchResult();
+          clearDslState(buildDefaultDslRequest());
+        }
         setSelectedConnectionId(nextId);
       }
       showAppNotification({
         id: 'connection-saved',
-        color: 'mint',
+        color: 'pink',
         title: '连接已保存',
         message: '本地配置更新成功'
       });
@@ -376,10 +493,11 @@ function AppContent() {
         setSelectedIndex(undefined);
         setIndices([]);
         clearSearchResult();
+        clearDslState(buildDefaultDslRequest());
       }
       showAppNotification({
         id: 'connection-deleted',
-        color: 'mint',
+        color: 'pink',
         title: '连接已删除',
         message: '本地配置已移除'
       });
@@ -389,9 +507,14 @@ function AppContent() {
   }
 
   async function loadIndices(connection: ConnectionConfig): Promise<void> {
+    const requestId = ++indicesRequestSeqRef.current;
     setLoadingIndices(true);
     try {
       const testResult = await getApi().testConnection(connection.id);
+      if (requestId !== indicesRequestSeqRef.current) {
+        return;
+      }
+
       if (!testResult.success) {
         showAppNotification({
           id: 'connection-test',
@@ -404,38 +527,99 @@ function AppContent() {
       }
 
       const data = await getApi().getIndices(connection.id);
+      if (requestId !== indicesRequestSeqRef.current) {
+        return;
+      }
+
       setIndices(data);
       setSelectedIndex((current) => (current && data.some((item) => item.name === current) ? current : data[0]?.name));
       showAppNotification({
         id: 'connection-test',
-        color: 'mint',
+        color: 'pink',
         title: '连接成功',
         message: `${testResult.clusterName || 'ES 集群'} · ${testResult.version || '未知版本'}`
       });
     } catch (error) {
+      if (requestId !== indicesRequestSeqRef.current) {
+        return;
+      }
       showError(error, '读取索引失败');
     } finally {
-      setLoadingIndices(false);
+      if (requestId === indicesRequestSeqRef.current) {
+        setLoadingIndices(false);
+      }
     }
   }
 
   async function loadIndexFields(connectionId: string, index: string): Promise<void> {
+    const requestId = ++indexFieldsRequestSeqRef.current;
     try {
       const fields = await getApi().getIndexFields(connectionId, index);
+      if (requestId !== indexFieldsRequestSeqRef.current) {
+        return;
+      }
+
       setIndexFields(fields);
     } catch (error) {
+      if (requestId !== indexFieldsRequestSeqRef.current) {
+        return;
+      }
       showError(error, '读取索引字段失败');
     }
   }
 
+  async function loadIndexMetadata(connectionId: string, index: string): Promise<void> {
+    const requestId = ++indexMetadataRequestSeqRef.current;
+    setLoadingIndexMetadata(true);
+    try {
+      const metadata = await getApi().getIndexMetadata(connectionId, index);
+      if (requestId !== indexMetadataRequestSeqRef.current) {
+        return;
+      }
+
+      setIndexMetadata(metadata);
+    } catch (error) {
+      if (requestId !== indexMetadataRequestSeqRef.current) {
+        return;
+      }
+      setIndexMetadata(undefined);
+      showError(error, '读取索引信息失败');
+    } finally {
+      if (requestId === indexMetadataRequestSeqRef.current) {
+        setLoadingIndexMetadata(false);
+      }
+    }
+  }
+
   function clearSearchResult(): void {
+    searchRequestSeqRef.current += 1;
+    setQuerying(false);
     setDocuments([]);
     setRows([]);
     setDirtyState({});
     setSelectedRowKey(undefined);
-    setCheckedRowKey(undefined);
+    setCheckedRowKeys([]);
     setSearchTotal(0);
     setCurrentPage(1);
+    setQueryPanelCollapsed(false);
+  }
+
+  function clearDslState(nextRequest = buildDefaultDslRequest()): void {
+    dslRequestSeqRef.current += 1;
+    setDslExecuting(false);
+    setDslRequest(nextRequest);
+    setDslResponse('');
+    setDslStatusCode(undefined);
+  }
+
+  function handleEnterDslWorkspace(): void {
+    setWorkspaceMode('dsl');
+    setDetailCollapsed(true);
+    clearDslState(buildDefaultDslRequest(selectedIndex));
+  }
+
+  function handleExitDslWorkspace(): void {
+    setWorkspaceMode('table');
     setQueryPanelCollapsed(false);
   }
 
@@ -445,10 +629,10 @@ function AppContent() {
       preserveDraftRows?: GridRow[];
       connectionId?: string;
       index?: string;
-      mode?: QueryMode;
+      mode?: 'keyword';
       keyword?: string;
-      jsonQuery?: string;
       filters?: QueryFilter[];
+      filterJoinMode?: FilterJoinMode;
       size?: number;
       collapseSidebar?: boolean;
       collapseQueryPanel?: boolean;
@@ -456,10 +640,10 @@ function AppContent() {
   ): Promise<void> {
     const effectiveConnectionId = options?.connectionId ?? selectedConnectionId;
     const effectiveIndex = options?.index ?? selectedIndex;
-    const effectiveMode = options?.mode ?? queryMode;
+    const effectiveMode = options?.mode ?? 'keyword';
     const effectiveKeyword = options?.keyword ?? keyword;
-    const effectiveJsonQuery = options?.jsonQuery ?? jsonQuery;
     const effectiveFilters = options?.filters ?? filters;
+    const effectiveFilterJoinMode = options?.filterJoinMode ?? filterJoinMode;
     const effectiveSize = options?.size ?? size;
 
     if (!effectiveConnectionId) {
@@ -486,6 +670,7 @@ function AppContent() {
       setSidebarCollapsed(true);
     }
 
+    const requestId = ++searchRequestSeqRef.current;
     setQuerying(true);
     try {
       const safePage = Math.max(1, targetPage);
@@ -495,11 +680,15 @@ function AppContent() {
         index: effectiveIndex,
         mode: effectiveMode,
         keyword: effectiveKeyword,
-        jsonQuery: effectiveJsonQuery,
         filters: effectiveFilters,
+        filterJoinMode: effectiveFilterJoinMode,
         size: effectiveSize,
         from: (safePage - 1) * effectiveSize
       });
+      if (requestId !== searchRequestSeqRef.current) {
+        return;
+      }
+
       const fields = collectFieldNames(result.documents);
       const nextRows = [...preservedDraftRows, ...toGridRows(result.documents, fields)];
 
@@ -512,7 +701,9 @@ function AppContent() {
         }
         return nextRows[0]?._rowKey;
       });
-      setCheckedRowKey((current) => (current && preservedDraftRows.some((row) => row._rowKey === current) ? current : undefined));
+      setCheckedRowKeys((current) =>
+        current.filter((rowKey) => preservedDraftRows.some((row) => row._rowKey === rowKey))
+      );
       setSearchTotal(result.total);
       setCurrentPage(safePage);
       if (effectiveSize !== size) {
@@ -524,15 +715,78 @@ function AppContent() {
 
       showAppNotification({
         id: 'search-complete',
-        color: 'blue',
+        color: 'pink',
         title: '查询完成',
         message: `第 ${safePage} 页 · 已加载 ${result.documents.length} 条文档`
       });
     } catch (error) {
+      if (requestId !== searchRequestSeqRef.current) {
+        return;
+      }
       showError(error, '查询失败');
     } finally {
-      setQuerying(false);
+      if (requestId === searchRequestSeqRef.current) {
+        setQuerying(false);
+      }
     }
+  }
+
+  async function handleExecuteDsl(): Promise<void> {
+    if (!selectedConnectionId) {
+      showAppNotification({
+        id: 'dsl-guard',
+        color: 'yellow',
+        title: '请先选择连接',
+        message: '连接成功后才能执行 DSL 请求'
+      });
+      return;
+    }
+
+    let parsedRequest: ReturnType<typeof parseDslRequestText>;
+
+    try {
+      parsedRequest = parseDslRequestText(dslRequest);
+    } catch (error) {
+      showError(error, 'DSL 请求格式不正确');
+      return;
+    }
+
+    const requestId = ++dslRequestSeqRef.current;
+    setDslExecuting(true);
+    try {
+      const result = await getApi().executeDslRequest({
+        connectionId: selectedConnectionId,
+        ...parsedRequest
+      });
+      if (requestId !== dslRequestSeqRef.current) {
+        return;
+      }
+
+      setDslStatusCode(result.statusCode);
+      setDslResponse(result.responseBody);
+      showAppNotification({
+        id: 'dsl-complete',
+        color: result.statusCode >= 400 ? 'yellow' : 'pink',
+        title: result.statusCode >= 400 ? 'DSL 执行完成（返回错误）' : 'DSL 执行成功',
+        message: `${parsedRequest.method} ${parsedRequest.path} · HTTP ${result.statusCode}`,
+        autoClose: 2200
+      });
+    } catch (error) {
+      if (requestId !== dslRequestSeqRef.current) {
+        return;
+      }
+      setDslStatusCode(undefined);
+      setDslResponse('');
+      showError(error, 'DSL 执行失败');
+    } finally {
+      if (requestId === dslRequestSeqRef.current) {
+        setDslExecuting(false);
+      }
+    }
+  }
+
+  function handleClearDsl(): void {
+    clearDslState(buildDefaultDslRequest(selectedIndex));
   }
 
   async function handleSaveChanges(): Promise<void> {
@@ -628,12 +882,12 @@ function AppContent() {
       }
 
       if (failedResults.length === 0 && createValidations.length === 0) {
-        showAppNotification({
-          id: 'save-result',
-          color: 'mint',
-          title: '保存成功',
-          message: `已保存 ${updateResults.length + createResults.length} 条文档变更`
-        });
+      showAppNotification({
+        id: 'save-result',
+        color: 'pink',
+        title: '保存成功',
+        message: `已保存 ${updateResults.length + createResults.length} 条文档变更`
+      });
       } else {
         const message = [...createValidations, ...failedResults.map(formatSaveError)].join('；');
         showAppNotification({
@@ -660,48 +914,28 @@ function AppContent() {
   }
 
   async function handleDeleteDocument(): Promise<void> {
-    if (!selectedConnectionId || !selectedIndex || !selectedRowKey || selectedRowKey !== checkedRowKey || deleting || querying || saving) {
+    if (!selectedConnectionId || !selectedIndex || checkedRowKeys.length === 0 || deleting || querying || saving) {
       return;
     }
 
-    if (checkedDraftRow) {
-      const confirmed = window.confirm('确定删除当前草稿行吗？未保存的内容会直接丢失。');
-      if (!confirmed) {
-        return;
-      }
-
-      const deletedRowIndex = rows.findIndex((row) => row._rowKey === checkedDraftRow._rowKey);
-      const nextRows = rows.filter((row) => row._rowKey !== checkedDraftRow._rowKey);
-
-      setRows(nextRows);
-      setCheckedRowKey(undefined);
-      if (nextRows.length > 0) {
-        const nextSelectedIndex = deletedRowIndex >= 0 ? Math.min(deletedRowIndex, nextRows.length - 1) : 0;
-        setSelectedRowKey(nextRows[nextSelectedIndex]?._rowKey);
-      } else {
-        setSelectedRowKey(undefined);
-      }
-
-      showAppNotification({
-        id: 'delete-result',
-        color: 'mint',
-        title: '草稿已删除',
-        message: '未保存的草稿行已移除'
-      });
+    if (checkedDraftRows.length === 0 && checkedDocuments.length === 0) {
       return;
     }
 
-    if (!selectedDocument || !checkedDocument) {
-      return;
-    }
-
-    const documentId = checkedDocument._id;
-    const hasUnsavedChanges = Boolean(dirtyState[documentId] && Object.keys(dirtyState[documentId]).length > 0);
+    const checkedDocumentIds = checkedDocuments.map((item) => item._id);
+    const checkedDraftRowKeys = new Set(checkedDraftRows.map((item) => item._rowKey));
+    const unsavedDocumentCount = checkedDocumentIds.filter(
+      (id) => dirtyState[id] && Object.keys(dirtyState[id]).length > 0
+    ).length;
     const confirmed = window.confirm(
       [
-        `确定删除当前索引「${selectedIndex}」下的文档「${documentId}」吗？`,
+        `确定删除当前索引「${selectedIndex}」下已勾选的 ${checkedRowKeys.length} 项内容吗？`,
         '此操作不可恢复。',
-        hasUnsavedChanges ? '该文档存在未保存修改，这些修改会一并丢弃。' : '若该文档存在未保存修改，这些修改会一并丢弃。'
+        checkedDocuments.length > 0 ? `包含 ${checkedDocuments.length} 条文档。` : '未勾选已保存文档。',
+        checkedDraftRows.length > 0 ? `包含 ${checkedDraftRows.length} 条草稿行，未保存内容会直接丢失。` : '未勾选草稿行。',
+        unsavedDocumentCount > 0
+          ? `${unsavedDocumentCount} 条文档存在未保存修改，这些修改会一并丢弃。`
+          : '若勾选文档存在未保存修改，这些修改会一并丢弃。'
       ].join('\n')
     );
 
@@ -709,58 +943,84 @@ function AppContent() {
       return;
     }
 
-    const deletedRowKey = `${checkedDocument._index}:${checkedDocument._id}`;
-    const deletedRowIndex = rows.findIndex((row) => row._rowKey === deletedRowKey);
-
     setDeleting(true);
     try {
-      const result = await getApi().deleteDocument({
-        connectionId: selectedConnectionId,
-        index: selectedIndex,
-        id: documentId
+      const deleteResults = await Promise.all(
+        checkedDocuments.map((document) =>
+          getApi().deleteDocument({
+            connectionId: selectedConnectionId,
+            index: selectedIndex,
+            id: document._id
+          })
+        )
+      );
+      const successfulDocumentIds = new Set(
+        deleteResults.filter((item) => item.success).map((item) => item.id)
+      );
+      const failedResults = deleteResults.filter((item) => !item.success);
+      const removedRowKeys = new Set<string>(checkedDraftRowKeys);
+
+      checkedDocuments.forEach((document) => {
+        if (successfulDocumentIds.has(document._id)) {
+          removedRowKeys.add(`${document._index}:${document._id}`);
+        }
       });
 
-      if (!result.success) {
-        showAppNotification({
-          id: 'delete-result',
-          color: 'red',
-          title: '删除失败',
-          message: result.message ?? '删除失败',
-          autoClose: 2600
-        });
-        return;
-      }
-
-      const nextDocuments = documents.filter((document) => document._id !== documentId);
-      const nextRows = rows.filter((row) => row._id !== documentId);
-      const nextTotal = Math.max(searchTotal - 1, 0);
+      const nextDocuments = documents.filter((document) => !successfulDocumentIds.has(document._id));
+      const nextRows = rows.filter((row) => !removedRowKeys.has(row._rowKey));
+      const nextTotal = Math.max(searchTotal - successfulDocumentIds.size, 0);
 
       setDocuments(nextDocuments);
       setRows(nextRows);
       setDirtyState((current) => {
         const nextState = { ...current };
-        delete nextState[documentId];
+        successfulDocumentIds.forEach((id) => {
+          delete nextState[id];
+        });
         return nextState;
       });
-      setCheckedRowKey(undefined);
+      setCheckedRowKeys((current) => current.filter((rowKey) => !removedRowKeys.has(rowKey)));
       setSearchTotal(nextTotal);
 
-      if (nextRows.length > 0) {
-        const nextSelectedIndex = deletedRowIndex >= 0 ? Math.min(deletedRowIndex, nextRows.length - 1) : 0;
-        setSelectedRowKey(nextRows[nextSelectedIndex]?._rowKey);
-      } else {
-        setSelectedRowKey(undefined);
-      }
-
-      showAppNotification({
-        id: 'delete-result',
-        color: 'mint',
-        title: '删除成功',
-        message: `文档 ${documentId} 已删除`
+      setSelectedRowKey((current) => {
+        if (current && nextRows.some((row) => row._rowKey === current)) {
+          return current;
+        }
+        return nextRows[0]?._rowKey;
       });
 
-      if (nextRows.length === 0 && currentPage > 1) {
-        await handleSearch(currentPage - 1);
+      const deletedDraftCount = checkedDraftRows.length;
+      const deletedDocumentCount = successfulDocumentIds.size;
+      const deletedTotal = deletedDraftCount + deletedDocumentCount;
+
+      if (failedResults.length === 0) {
+        showAppNotification({
+          id: 'delete-result',
+          color: 'pink',
+          title: '删除成功',
+          message: `已删除 ${deletedTotal} 项内容，其中包含 ${deletedDocumentCount} 条文档和 ${deletedDraftCount} 条草稿`
+        });
+      } else {
+        const summary = failedResults
+          .slice(0, 2)
+          .map((item) => `${item.id}：${item.message ?? '删除失败'}`)
+          .join('；');
+        showAppNotification({
+          id: 'delete-result',
+          color: deletedTotal > 0 ? 'yellow' : 'red',
+          title: deletedTotal > 0 ? '部分删除成功' : '删除失败',
+          message:
+            deletedTotal > 0
+              ? `已删除 ${deletedTotal} 项，另有 ${failedResults.length} 条文档删除失败${summary ? `：${summary}` : ''}`
+              : summary || '已勾选文档删除失败',
+          autoClose: 3200
+        });
+      }
+
+      if (nextRows.length === 0 && currentPage > 1 && successfulDocumentIds.size > 0) {
+        await handleSearch(currentPage - 1, {
+          preserveDraftRows: nextRows.filter((row) => row._isDraft)
+        });
       }
     } catch (error) {
       showError(error, '删除失败');
@@ -774,85 +1034,56 @@ function AppContent() {
       return;
     }
 
-    try {
-      const originalMap = documents.reduce<Record<string, EsDocument>>((accumulator, document) => {
-        accumulator[document._id] = document;
-        return accumulator;
-      }, {});
+    const originalMap = documents.reduce<Record<string, EsDocument>>((accumulator, document) => {
+      accumulator[document._id] = document;
+      return accumulator;
+    }, {});
 
-      const nextDirtyState: DirtyState = {};
+    const nextDirtyState: DirtyState = {};
 
-      nextRows.forEach((row) => {
-        const original = originalMap[row._id];
-        if (row._isDraft) {
+    nextRows.forEach((row) => {
+      const original = originalMap[row._id];
+      if (row._isDraft || !original) {
+        return;
+      }
+
+      Object.keys(row).forEach((field) => {
+        if (field.startsWith('_')) {
           return;
         }
 
-        if (!original) {
+        const nextValue = row[field];
+        const primitiveOriginalValue = getPrimitiveValueByPath(original._source, field);
+        const nextComparable = String(nextValue ?? '');
+        const originalComparable = String(primitiveOriginalValue ?? '');
+        const normalizedNextValue =
+          nextValue === null || typeof nextValue === 'string' || typeof nextValue === 'number' || typeof nextValue === 'boolean'
+            ? nextValue
+            : String(nextValue);
+
+        if (primitiveOriginalValue === undefined) {
+          if (nextValue === '' || nextValue === undefined) {
+            return;
+          }
+
+          nextDirtyState[row._id] = {
+            ...(nextDirtyState[row._id] ?? {}),
+            [field]: normalizedNextValue as import('../../shared/types').PrimitiveValue
+          };
           return;
         }
 
-        Object.keys(row).forEach((field) => {
-          if (field.startsWith('_')) {
-            return;
-          }
-
-          const originalValue = original._source[field];
-          const primitiveOriginalValue = getPrimitiveValueByPath(original._source, field);
-          if (primitiveOriginalValue === undefined) {
-            const nextValue = row[field];
-            if (nextValue === '' || nextValue === undefined) {
-              return;
-            }
-
-            const fieldType = fieldTypeMap[field];
-            if (fieldType === 'boolean') {
-              const text = String(nextValue).trim().toLowerCase();
-              if (text !== 'true' && text !== 'false' && text !== '1' && text !== '0') {
-                throw new Error('布尔字段请输入 true / false');
-              }
-              nextDirtyState[row._id] = {
-                ...(nextDirtyState[row._id] ?? {}),
-                [field]: text === 'true' || text === '1'
-              };
-              return;
-            }
-
-            if (['byte', 'short', 'integer', 'long', 'unsigned_long', 'half_float', 'float', 'double', 'scaled_float'].includes(fieldType)) {
-              const parsed = Number(nextValue);
-              if (Number.isNaN(parsed)) {
-                throw new Error('数字字段只能输入数字');
-              }
-              nextDirtyState[row._id] = {
-                ...(nextDirtyState[row._id] ?? {}),
-                [field]: parsed
-              };
-              return;
-            }
-
-            nextDirtyState[row._id] = {
-              ...(nextDirtyState[row._id] ?? {}),
-              [field]: String(nextValue)
-            };
-            return;
-          }
-
-          const normalized = normalizeCellValue(row[field], primitiveOriginalValue);
-          if (normalized !== undefined && normalized !== primitiveOriginalValue) {
-            nextDirtyState[row._id] = {
-              ...(nextDirtyState[row._id] ?? {}),
-              [field]: normalized
-            };
-          }
-        });
+        if (nextComparable !== originalComparable) {
+          nextDirtyState[row._id] = {
+            ...(nextDirtyState[row._id] ?? {}),
+            [field]: normalizedNextValue as import('../../shared/types').PrimitiveValue
+          };
+        }
       });
+    });
 
-      setRows(nextRows);
-      setDirtyState(nextDirtyState);
-    } catch (error) {
-      showError(error, '单元格内容格式不正确');
-      setRows((current) => [...current]);
-    }
+    setRows(nextRows);
+    setDirtyState(nextDirtyState);
   }
 
   function showError(error: unknown, fallback: string): void {
@@ -867,7 +1098,27 @@ function AppContent() {
 
   function handleSelectRow(rowKey: string): void {
     setSelectedRowKey(rowKey);
-    setCheckedRowKey((current) => (current && current !== rowKey ? undefined : current));
+    setDetailTab('document');
+  }
+
+  function handleOpenIndexMetadata(tab: Exclude<DetailTab, 'document'> = 'settings'): void {
+    if (!selectedIndex) {
+      showAppNotification({
+        id: 'index-detail-guard',
+        color: 'yellow',
+        title: '请先选择索引',
+        message: '选择索引后才能查看 settings 和 mappings'
+      });
+      return;
+    }
+
+    if (!detailCollapsed && detailTab !== 'document') {
+      setDetailCollapsed(true);
+      return;
+    }
+
+    setDetailTab(tab);
+    setDetailCollapsed(false);
   }
 
   function handleAddDraftRow(): void {
@@ -894,18 +1145,23 @@ function AppContent() {
 
     setRows((current) => [draftRow, ...current]);
     setSelectedRowKey(rowKey);
-    setCheckedRowKey(undefined);
     setGridScrollToTopSignal((current) => current + 1);
     showAppNotification({
       id: 'add-draft',
-      color: 'blue',
+      color: 'pink',
       title: '已新增空白行',
       message: '可选填写 _id；留空时会由 Elasticsearch 自动生成'
     });
   }
 
   function handleToggleDeleteCheck(rowKey: string, checked: boolean): void {
-    setCheckedRowKey(checked ? rowKey : undefined);
+    setCheckedRowKeys((current) => {
+      if (checked) {
+        return current.includes(rowKey) ? current : [...current, rowKey];
+      }
+
+      return current.filter((item) => item !== rowKey);
+    });
     if (checked) {
       setSelectedRowKey(rowKey);
     }
@@ -936,7 +1192,7 @@ function AppContent() {
           >
             <Group gap="sm" className="header-brand">
               <div className="brand-badge">
-                <IconHeartHandshake size={18} />
+                <img src={appIcon} alt="Tiny ES Studio 图标" className="brand-badge-image" />
               </div>
               <Stack gap={1} className="header-brand-copy">
                 <Text fw={800} size="lg" className="header-brand-title">
@@ -946,39 +1202,110 @@ function AppContent() {
                   <Text size="xs" c="dimmed" className="header-brand-subtitle">
                     {compactHeader ? 'Elasticsearch 小工具' : '可爱但专业的 Elasticsearch 小工具'}
                   </Text>
-                  <span className="header-signature-pill">by Lingfeng</span>
                 </Group>
               </Stack>
             </Group>
             <Group gap={compactHeader ? 'xs' : 'sm'} className="header-actions">
-              {selectedConnection ? (
-                <div className="header-status-pill">
-                  <Text size="xs" className="header-status-label">
-                    当前连接
-                  </Text>
-                  <Text size="sm" fw={700} truncate className="header-status-value">
-                    {selectedConnection.name}
-                  </Text>
-                </div>
-              ) : null}
+              <div className="header-control-cluster">
+                {selectedConnection ? (
+                  <div className="header-connection-inline header-control-pill">
+                    <span className="header-connection-caption">当前连接:</span>
+                    <span className="header-connection-name">{selectedConnection.name}</span>
+                  </div>
+                ) : null}
 
-              <Tooltip label={selectedConnection ? '重新测试连接并刷新索引' : '请先选择连接'} withArrow>
-                <ActionIcon
-                  size={38}
-                  radius="xl"
-                  variant="transparent"
-                  loading={loadingIndices}
-                  disabled={!selectedConnection}
-                  aria-label="重新测试连接并刷新索引"
-                  className="header-icon-button"
-                  onClick={() => selectedConnection && void loadIndices(selectedConnection)}
-                >
-                  <IconPlugConnected size={18} />
-                </ActionIcon>
-              </Tooltip>
+                {selectedIndex ? (
+                  <div className="header-connection-inline header-control-pill">
+                    <span className="header-connection-caption">当前索引:</span>
+                    <span className="header-connection-name">{selectedIndex}</span>
+                  </div>
+                ) : null}
+
+                <Tooltip label={selectedConnection ? '重新测试连接并刷新索引' : '请先选择连接'} withArrow>
+                  <UnstyledButton
+                    type="button"
+                    className="header-action-button header-action-button-icon"
+                    disabled={!selectedConnection || loadingIndices}
+                    aria-label="重新测试连接并刷新索引"
+                    onClick={() => selectedConnection && void loadIndices(selectedConnection)}
+                  >
+                    {loadingIndices ? <Loader size={14} color="currentColor" /> : <IconPlugConnected size={16} />}
+                  </UnstyledButton>
+                </Tooltip>
+
+                <Tooltip label={workspaceMode === 'dsl' ? '返回表格' : 'DSL 控制台'} withArrow>
+                  <UnstyledButton
+                    type="button"
+                    className="header-action-button header-action-button-icon"
+                    aria-label={workspaceMode === 'dsl' ? '返回表格' : 'DSL 控制台'}
+                    onClick={workspaceMode === 'dsl' ? handleExitDslWorkspace : handleEnterDslWorkspace}
+                  >
+                    {workspaceMode === 'dsl' ? <IconTable size={16} /> : <IconTerminal2 size={16} />}
+                  </UnstyledButton>
+                </Tooltip>
+
+                <Tooltip label="关于 Tiny ES Studio" withArrow>
+                  <UnstyledButton
+                    type="button"
+                    className="header-action-button header-action-button-icon"
+                    aria-label="关于 Tiny ES Studio"
+                    onClick={() => setAboutOpened(true)}
+                  >
+                    <IconInfoCircle size={16} />
+                  </UnstyledButton>
+                </Tooltip>
+
+                <Tooltip label={themeMode === 'dark' ? '切回浅色模式' : '切换暗黑模式'} withArrow>
+                  <UnstyledButton
+                    type="button"
+                    className="header-action-button header-action-button-icon"
+                    aria-label={themeMode === 'dark' ? '切回浅色模式' : '切换暗黑模式'}
+                    onClick={onToggleTheme}
+                  >
+                    {themeMode === 'dark' ? <IconSunHigh size={16} /> : <IconMoonStars size={16} />}
+                  </UnstyledButton>
+                </Tooltip>
+              </div>
             </Group>
           </Group>
         </AppShell.Header>
+
+        <Modal
+          opened={aboutOpened}
+          onClose={() => setAboutOpened(false)}
+          centered
+          radius="xl"
+          title="关于 Tiny ES Studio"
+          classNames={{
+            content: 'about-modal-content',
+            header: 'about-modal-header',
+            title: 'about-modal-title',
+            body: 'about-modal-body',
+            close: 'about-modal-close'
+          }}
+          overlayProps={{ backgroundOpacity: themeMode === 'dark' ? 0.68 : 0.34, blur: 16 }}
+        >
+          <Stack gap="lg">
+            <Group gap="md" align="flex-start" wrap="nowrap" className="about-modal-hero">
+              <div className="about-modal-badge">
+                <img src={appIcon} alt="Tiny ES Studio 图标" className="brand-badge-image" />
+              </div>
+              <Stack gap={4} className="about-modal-copy">
+                <Text className="about-modal-name">Tiny ES Studio</Text>
+                <Text className="about-modal-subtitle">可爱但专业的 Elasticsearch 小工具</Text>
+                <Text className="about-modal-meta">
+                  版本 {APP_VERSION} · 作者 {APP_AUTHOR}
+                </Text>
+              </Stack>
+            </Group>
+
+            <div className="about-modal-panel">
+              <Text className="about-modal-description">
+                为个人开发者准备的轻量 Elasticsearch 桌面工作台，支持表格查询与编辑、DSL 控制台、索引设置和映射查看。
+              </Text>
+            </div>
+          </Stack>
+        </Modal>
 
         <AppShell.Navbar className={sidebarCollapsed ? 'app-navbar app-navbar-collapsed' : 'app-navbar'}>
           {sidebarCollapsed ? (
@@ -1007,6 +1334,7 @@ function AppContent() {
                   setIndices([]);
                   resetQueryControls();
                   clearSearchResult();
+                  clearDslState(buildDefaultDslRequest());
                 }}
                 onAddConnection={() => {
                   setEditingConnection(null);
@@ -1022,27 +1350,37 @@ function AppContent() {
                 onSelectIndex={(indexName) => {
                   const nextFilters = [createFilter()];
                   setSelectedIndex(indexName);
-                  setQueryMode('keyword');
-                  setKeyword('');
-                  setJsonQuery(defaultJsonQuery);
-                  setFilters(nextFilters);
-                  setSize(50);
-                  setCurrentPage(1);
                   clearSearchResult();
                   setSidebarCollapsed(true);
-                  showAppNotification({
-                    id: 'index-switched',
-                    color: 'blue',
-                    title: '已切换索引',
-                    message: `正在加载 ${indexName} 的前 50 条文档`
-                  });
-                  if (selectedConnectionId) {
+                  if (workspaceMode === 'table') {
+                    setKeyword('');
+                    setFilters(nextFilters);
+                    setSize(50);
+                    setCurrentPage(1);
+                    showAppNotification({
+                      id: 'index-switched',
+                      color: 'pink',
+                      title: '已切换索引',
+                      message: `正在加载 ${indexName} 的前 50 条文档`
+                    });
+                  } else {
+                    setDslRequest(buildDefaultDslRequest(indexName));
+                    setDslResponse('');
+                    setDslStatusCode(undefined);
+                    showAppNotification({
+                      id: 'index-switched',
+                      color: 'pink',
+                      title: '已切换索引',
+                      message: `当前 DSL 模式不会自动查询，已切换到 ${indexName}`
+                    });
+                  }
+
+                  if (selectedConnectionId && workspaceMode === 'table') {
                     void handleSearch(1, {
                       connectionId: selectedConnectionId,
                       index: indexName,
                       mode: 'keyword',
                       keyword: '',
-                      jsonQuery: defaultJsonQuery,
                       filters: nextFilters,
                       size: 50,
                       preserveDraftRows: [],
@@ -1067,10 +1405,15 @@ function AppContent() {
           )}
         </AppShell.Navbar>
 
-        {!detailCollapsed ? (
+        {workspaceMode === 'table' && !detailCollapsed ? (
           <AppShell.Aside className="app-aside">
             <JsonDetailPanel
               document={selectedDocument}
+              selectedIndex={selectedIndex}
+              metadata={indexMetadata}
+              loadingMetadata={loadingIndexMetadata}
+              activeTab={detailTab}
+              onChangeTab={setDetailTab}
               collapsed={detailCollapsed}
               onToggleCollapse={() => setDetailCollapsed((value) => !value)}
             />
@@ -1078,224 +1421,249 @@ function AppContent() {
         ) : null}
 
         <AppShell.Main className="app-main">
-          <Stack gap={narrowViewport ? 'xs' : 'sm'} h={mainViewportHeight} className="main-stack">
-            <Card
-              radius="xl"
-              p={0}
-              className={compactResultsLayout ? 'grid-card results-card results-card-compact' : 'grid-card results-card'}
-              style={compactResultsLayout ? undefined : { flex: 1 }}
-            >
-              <div className="grid-toolbar-row">
-                <div className="grid-toolbar-inline">
-                  <Group gap="sm" align="center" wrap="wrap" className="grid-toolbar-summary">
-                    <Text fw={700} className="grid-toolbar-title">查询结果</Text>
-                    {rows.length > 0 ? (
-                      <>
-                        <Text size="sm" c="dimmed" className="grid-toolbar-count">
-                          共 {searchTotal} 条
+          {workspaceMode === 'table' ? (
+            <Stack gap={narrowViewport ? 'xs' : 'sm'} h={mainViewportHeight} className="main-stack">
+              <Card
+                radius="xl"
+                p={0}
+                className={compactResultsLayout ? 'grid-card results-card results-card-compact' : 'grid-card results-card'}
+                style={compactResultsLayout ? undefined : { flex: 1 }}
+              >
+                <div className="grid-toolbar-row">
+                  <div className="grid-toolbar-inline">
+                    <Group gap="sm" align="center" wrap="wrap" className="grid-toolbar-summary">
+                      <Text fw={700} className="grid-toolbar-title">查询结果</Text>
+                      {rows.length > 0 ? (
+                        <>
+                          <Text size="sm" c="dimmed" className="grid-toolbar-count">
+                            共 {searchTotal} 条
+                          </Text>
+                        </>
+                      ) : (
+                        <Text size="sm" c="dimmed">
+                          结果会以表格方式展示，单击单元格即可编辑。
                         </Text>
-                      </>
-                    ) : (
-                      <Text size="sm" c="dimmed">
-                        结果会以表格方式展示，单击单元格即可编辑。
-                      </Text>
-                    )}
-                  </Group>
+                      )}
+                    </Group>
 
-                  <div className="grid-toolbar-leading">
-                    {rows.length > 0 ? (
-                      <Group gap="xs" align="center" wrap="nowrap" className="grid-pagination-controls">
-                        <Tooltip label="回到第一页" withArrow>
-                          <ActionIcon
-                            size={32}
-                            radius="xl"
-                            variant="transparent"
-                            aria-label="回到第一页"
-                            disabled={currentPage <= 1 || querying}
-                            className="grid-toolbar-icon-button grid-pagination-icon-button"
-                            onClick={() => void handleSearch(1)}
-                          >
-                            <IconChevronsLeft size={15} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="上一页" withArrow>
-                          <ActionIcon
-                            size={32}
-                            radius="xl"
-                            variant="transparent"
-                            aria-label="上一页"
-                            disabled={currentPage <= 1 || querying}
-                            className="grid-toolbar-icon-button grid-pagination-icon-button"
-                            onClick={() => void handleSearch(currentPage - 1)}
-                          >
-                            <IconChevronLeft size={15} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <div className="grid-pagination-status" aria-label={`第 ${currentPage} 页，共 ${totalPages} 页`}>
-                          <span className="grid-pagination-status-label">第</span>
-                          <span className="grid-pagination-status-value">{currentPage}</span>
-                          <span className="grid-pagination-status-separator">/</span>
-                          <span className="grid-pagination-status-value">{totalPages}</span>
-                          <span className="grid-pagination-status-label">页</span>
-                        </div>
-                        <Tooltip label="下一页" withArrow>
-                          <ActionIcon
-                            size={32}
-                            radius="xl"
-                            variant="transparent"
-                            aria-label="下一页"
-                            disabled={currentPage >= totalPages || querying}
-                            className="grid-toolbar-icon-button grid-pagination-icon-button"
-                            onClick={() => void handleSearch(currentPage + 1)}
-                          >
-                            <IconChevronRight size={15} />
-                          </ActionIcon>
-                        </Tooltip>
-                        <Tooltip label="跳到末页" withArrow>
-                          <ActionIcon
-                            size={32}
-                            radius="xl"
-                            variant="transparent"
-                            aria-label="跳到末页"
-                            disabled={currentPage >= totalPages || querying}
-                            className="grid-toolbar-icon-button grid-pagination-icon-button"
-                            onClick={() => void handleSearch(totalPages)}
-                          >
-                            <IconChevronsRight size={15} />
-                          </ActionIcon>
-                        </Tooltip>
-                      </Group>
-                    ) : (
-                      <div className="grid-toolbar-pagination-placeholder" />
-                    )}
+                    <div className="grid-toolbar-leading">
+                      {rows.length > 0 ? (
+                        <Group gap="xs" align="center" wrap="nowrap" className="grid-pagination-controls">
+                          <Tooltip label="回到第一页" withArrow>
+                            <ActionIcon
+                              size={32}
+                              radius="xl"
+                              variant="transparent"
+                              aria-label="回到第一页"
+                              disabled={currentPage <= 1 || querying}
+                              className="grid-toolbar-icon-button grid-pagination-icon-button"
+                              onClick={() => void handleSearch(1)}
+                            >
+                              <IconChevronsLeft size={15} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="上一页" withArrow>
+                            <ActionIcon
+                              size={32}
+                              radius="xl"
+                              variant="transparent"
+                              aria-label="上一页"
+                              disabled={currentPage <= 1 || querying}
+                              className="grid-toolbar-icon-button grid-pagination-icon-button"
+                              onClick={() => void handleSearch(currentPage - 1)}
+                            >
+                              <IconChevronLeft size={15} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <div className="grid-pagination-status" aria-label={`第 ${currentPage} 页，共 ${totalPages} 页`}>
+                            <span className="grid-pagination-status-label">第</span>
+                            <span className="grid-pagination-status-value">{currentPage}</span>
+                            <span className="grid-pagination-status-separator">/</span>
+                            <span className="grid-pagination-status-value">{totalPages}</span>
+                            <span className="grid-pagination-status-label">页</span>
+                          </div>
+                          <Tooltip label="下一页" withArrow>
+                            <ActionIcon
+                              size={32}
+                              radius="xl"
+                              variant="transparent"
+                              aria-label="下一页"
+                              disabled={currentPage >= totalPages || querying}
+                              className="grid-toolbar-icon-button grid-pagination-icon-button"
+                              onClick={() => void handleSearch(currentPage + 1)}
+                            >
+                              <IconChevronRight size={15} />
+                            </ActionIcon>
+                          </Tooltip>
+                          <Tooltip label="跳到末页" withArrow>
+                            <ActionIcon
+                              size={32}
+                              radius="xl"
+                              variant="transparent"
+                              aria-label="跳到末页"
+                              disabled={currentPage >= totalPages || querying}
+                              className="grid-toolbar-icon-button grid-pagination-icon-button"
+                              onClick={() => void handleSearch(totalPages)}
+                            >
+                              <IconChevronsRight size={15} />
+                            </ActionIcon>
+                          </Tooltip>
+                        </Group>
+                      ) : (
+                        <div className="grid-toolbar-pagination-placeholder" />
+                      )}
+                    </div>
+
+                    <Group gap="xs" align="center" wrap="nowrap" className="grid-toolbar-trailing">
+                      <Tooltip label="新增一行" withArrow>
+                        <ActionIcon
+                          size={34}
+                          radius="xl"
+                          variant="transparent"
+                          color="pink"
+                          disabled={!selectedConnectionId || !selectedIndex || querying || saving || deleting}
+                          className="grid-toolbar-icon-button grid-toolbar-icon-button-add"
+                          onClick={handleAddDraftRow}
+                        >
+                          <IconPlus size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip label={canSave ? '保存新增文档和已修改字段' : '还没有可保存的内容'} withArrow>
+                        <ActionIcon
+                          size={34}
+                          radius="xl"
+                          variant="transparent"
+                          loading={saving}
+                          disabled={!canSave}
+                          className="grid-toolbar-icon-button grid-toolbar-icon-button-save"
+                          onClick={() => void handleSaveChanges()}
+                        >
+                          <IconDeviceFloppy size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Tooltip
+                        label={canDelete ? `批量删除已勾选内容（${checkedRowKeys.length}）` : '请先勾选要删除的文档'}
+                        withArrow
+                      >
+                        <ActionIcon
+                          size={34}
+                          radius="xl"
+                          variant="transparent"
+                          color="red"
+                          loading={deleting}
+                          disabled={!canDelete}
+                          className="grid-toolbar-icon-button grid-toolbar-icon-button-danger"
+                          onClick={() => void handleDeleteDocument()}
+                        >
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                      <Button
+                        size="xs"
+                        variant="subtle"
+                        color="gray"
+                        className="grid-toolbar-detail-button"
+                        onClick={() => setDetailCollapsed((value) => !value)}
+                        leftSection={
+                          detailCollapsed ? (
+                            <IconLayoutSidebarRightExpand size={15} />
+                          ) : (
+                            <IconLayoutSidebarRightCollapse size={15} />
+                          )
+                        }
+                      >
+                        {narrowViewport ? '详情' : detailCollapsed ? '展开详情' : '收起详情'}
+                      </Button>
+                    </Group>
                   </div>
-
-                  <Group gap="xs" align="center" wrap="nowrap" className="grid-toolbar-trailing">
-                    <Tooltip label="新增一行" withArrow>
-                      <ActionIcon
-                        size={34}
-                        radius="xl"
-                        variant="transparent"
-                        color="pink"
-                        disabled={!selectedConnectionId || !selectedIndex || querying || saving || deleting}
-                        className="grid-toolbar-icon-button grid-toolbar-icon-button-add"
-                        onClick={handleAddDraftRow}
-                      >
-                        <IconPlus size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label={canSave ? '保存新增文档和已修改字段' : '还没有可保存的内容'} withArrow>
-                      <ActionIcon
-                        size={34}
-                        radius="xl"
-                        variant="transparent"
-                        loading={saving}
-                        disabled={!canSave}
-                        className="grid-toolbar-icon-button grid-toolbar-icon-button-save"
-                        onClick={() => void handleSaveChanges()}
-                      >
-                        <IconDeviceFloppy size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Tooltip label={canDelete ? '删除当前勾选文档' : '请先勾选当前要删除的文档'} withArrow>
-                      <ActionIcon
-                        size={34}
-                        radius="xl"
-                        variant="transparent"
-                        color="red"
-                        loading={deleting}
-                        disabled={!canDelete}
-                        className="grid-toolbar-icon-button grid-toolbar-icon-button-danger"
-                        onClick={() => void handleDeleteDocument()}
-                      >
-                        <IconTrash size={16} />
-                      </ActionIcon>
-                    </Tooltip>
-                    <Button
-                      size="xs"
-                      variant="subtle"
-                      color="gray"
-                      className="grid-toolbar-detail-button"
-                      onClick={() => setDetailCollapsed((value) => !value)}
-                      leftSection={
-                        detailCollapsed ? (
-                          <IconLayoutSidebarRightExpand size={15} />
-                        ) : (
-                          <IconLayoutSidebarRightCollapse size={15} />
-                        )
-                      }
-                    >
-                      {narrowViewport ? '详情' : detailCollapsed ? '展开详情' : '收起详情'}
-                    </Button>
-                  </Group>
                 </div>
-              </div>
-              {rows.length > 0 ? (
-                <DocumentsGrid
-                  compact={compactResultsLayout}
-                  fields={displayFields}
-                  rows={rows}
-                  documents={documents}
-                  dirtyState={dirtyState}
-                  selectedRowKey={selectedRowKey}
-                  checkedRowKey={checkedRowKey}
-                  fieldTypeMap={fieldTypeMap}
-                  scrollToTopSignal={gridScrollToTopSignal}
-                  onRowsChange={(nextRows) => handleRowsChange(nextRows)}
-                  onSelectRow={handleSelectRow}
-                  onToggleDeleteCheck={handleToggleDeleteCheck}
-                />
-              ) : (
-                <Stack justify="center" align="center" h="100%" gap="sm">
-                  <Text fw={700} size="lg">
-                    先选连接、加载索引，再发起一次查询
-                  </Text>
-                  <Text c="dimmed" size="sm">
-                    这里会以接近 Excel 的方式展示 Elasticsearch 文档，并支持直接编辑。
-                  </Text>
-                </Stack>
-              )}
-            </Card>
-
-            <QueryToolbar
-              selectedConnection={selectedConnection}
-              selectedIndex={selectedIndex}
-              collapsed={queryPanelCollapsed}
-              queryMode={queryMode}
-              keyword={keyword}
-              jsonQuery={jsonQuery}
-              filters={filters}
-              indexFields={indexFields}
-              size={size}
-              querying={querying}
-              dirtyCount={dirtyCount}
-              total={searchTotal}
-              compactMode={compactViewport}
-              onChangeMode={setQueryMode}
-              onChangeKeyword={setKeyword}
-              onChangeJsonQuery={setJsonQuery}
-              onAddFilter={() => setFilters((current) => [...current, createFilter()])}
-              onClearFilters={() => setFilters([createFilter()])}
-              onUpdateFilter={(id, patch) =>
-                setFilters((current) =>
-                  current.map((item) => (item.id === id ? { ...item, ...patch } : item))
-                )
-              }
-              onRemoveFilter={(id) =>
-                setFilters((current) => {
-                  if (current.length === 1) {
-                    return current;
-                  }
-                  return current.filter((item) => item.id !== id);
-                })
-              }
-              onChangeSize={setSize}
-              onSearch={() => void handleSearch(1, { collapseSidebar: true })}
-              onRefresh={() => void handleSearch(currentPage)}
-              onReset={resetQueryControls}
-              onToggleCollapsed={() => setQueryPanelCollapsed((current) => !current)}
-            />
-          </Stack>
+                {rows.length > 0 ? (
+                  <DocumentsGrid
+                    compact={compactResultsLayout}
+                    fields={displayFields}
+                    rows={rows}
+                    documents={documents}
+                    dirtyState={dirtyState}
+                    selectedRowKey={selectedRowKey}
+                    checkedRowKeys={checkedRowKeys}
+                    fieldTypeMap={fieldTypeMap}
+                    fieldFormatMap={fieldFormatMap}
+                    fieldDateFormatHintMap={fieldDateFormatHintMap}
+                    scrollToTopSignal={gridScrollToTopSignal}
+                    onRowsChange={(nextRows) => handleRowsChange(nextRows)}
+                    onSelectRow={handleSelectRow}
+                    onToggleDeleteCheck={handleToggleDeleteCheck}
+                  />
+                ) : (
+                  <Stack justify="center" align="center" h="100%" gap="sm">
+                    <Text fw={700} size="lg">
+                      先选连接、加载索引，再发起一次查询
+                    </Text>
+                    <Text c="dimmed" size="sm">
+                      这里会以接近 Excel 的方式展示 Elasticsearch 文档，并支持直接编辑。
+                    </Text>
+                  </Stack>
+                )}
+              </Card>
+              <QueryToolbar
+                selectedConnection={selectedConnection}
+                selectedIndex={selectedIndex}
+                collapsed={queryPanelCollapsed}
+                keyword={keyword}
+                filters={filters}
+                filterJoinMode={filterJoinMode}
+                indexFields={indexFields}
+                size={size}
+                querying={querying}
+                loadingIndexMetadata={loadingIndexMetadata}
+                dirtyCount={dirtyCount}
+                total={searchTotal}
+                compactMode={compactViewport}
+                onChangeKeyword={setKeyword}
+                onAddFilter={() => setFilters((current) => [...current, createFilter()])}
+                onClearFilters={() => {
+                  setFilters([createFilter()]);
+                  setFilterJoinMode('and');
+                }}
+                onChangeFilterJoinMode={setFilterJoinMode}
+                onUpdateFilter={(id, patch) =>
+                  setFilters((current) =>
+                    current.map((item) => (item.id === id ? { ...item, ...patch } : item))
+                  )
+                }
+                onRemoveFilter={(id) =>
+                  setFilters((current) => {
+                    if (current.length === 1) {
+                      return current;
+                    }
+                    return current.filter((item) => item.id !== id);
+                  })
+                }
+                onChangeSize={setSize}
+                onSearch={() => void handleSearch(1, { collapseSidebar: true })}
+                onRefresh={() => void handleSearch(currentPage)}
+                onReset={resetQueryControls}
+                onOpenIndexMetadata={() => handleOpenIndexMetadata('settings')}
+                onToggleCollapsed={() => setQueryPanelCollapsed((current) => !current)}
+              />
+            </Stack>
+          ) : (
+            <div className="dsl-main-shell" style={{ height: mainViewportHeight }}>
+              <DslWorkspace
+                selectedIndex={selectedIndex}
+                availableIndices={indices.map((item) => item.name)}
+                fieldOptions={indexFields}
+                themeMode={themeMode}
+                dslRequest={dslRequest}
+                dslResponse={dslResponse}
+                dslStatusCode={dslStatusCode}
+                dslExecuting={dslExecuting}
+                onChangeDslRequest={setDslRequest}
+                onExecuteDsl={() => void handleExecuteDsl()}
+                onClearDsl={handleClearDsl}
+              />
+          </div>
+        )}
         </AppShell.Main>
       </AppShell>
     </>
@@ -1308,11 +1676,30 @@ function formatSaveError(item: SaveDocumentResult): string {
 }
 
 export default function App() {
+  const [themeMode, setThemeMode] = useState<ThemeMode>(() => {
+    if (typeof window === 'undefined') {
+      return 'light';
+    }
+
+    const savedThemeMode = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return savedThemeMode === 'dark' ? 'dark' : 'light';
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(THEME_STORAGE_KEY, themeMode);
+    document.documentElement.dataset.appTheme = themeMode;
+    document.body.dataset.appTheme = themeMode;
+  }, [themeMode]);
+
   return (
-    <MantineProvider theme={theme} defaultColorScheme="light">
+    <MantineProvider theme={theme} defaultColorScheme="light" forceColorScheme={themeMode}>
       <Notifications position="top-right" limit={1} />
       <ErrorBoundary>
-        <AppContent />
+        <AppContent themeMode={themeMode} onToggleTheme={() => setThemeMode((current) => (current === 'dark' ? 'light' : 'dark'))} />
       </ErrorBoundary>
     </MantineProvider>
   );

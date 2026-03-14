@@ -1,6 +1,7 @@
-export type QueryMode = 'keyword' | 'json';
+export type QueryMode = 'keyword' | 'dsl';
 export type FilterOperator = 'contains' | 'eq' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'not_exists';
 export type IndexFieldFilterScope = 'standard' | 'nested';
+export type FilterJoinMode = 'and' | 'or';
 
 export interface QueryFilter {
   id: string;
@@ -46,18 +47,32 @@ export interface IndexSummary {
 export interface IndexFieldOption {
   name: string;
   type: string;
+  format?: string;
   filterScope?: IndexFieldFilterScope;
+}
+
+export interface IndexMetadataResult {
+  index: string;
+  settings: Record<string, unknown>;
+  mappings: Record<string, unknown>;
 }
 
 export interface SearchRequestPayload {
   connectionId: string;
   index: string;
-  mode: QueryMode;
+  mode: 'keyword';
   keyword?: string;
-  jsonQuery?: string;
   size?: number;
   from?: number;
   filters?: QueryFilter[];
+  filterJoinMode?: FilterJoinMode;
+}
+
+export interface ExecuteDslRequestPayload {
+  connectionId: string;
+  method: string;
+  path: string;
+  bodyText?: string;
 }
 
 export type PrimitiveValue = string | number | boolean | null;
@@ -71,6 +86,11 @@ export interface EsDocument {
 export interface SearchDocumentsResult {
   documents: EsDocument[];
   total: number;
+}
+
+export interface ExecuteDslResult {
+  statusCode: number;
+  responseBody: string;
 }
 
 export interface UpdateDocumentPayload {
@@ -112,7 +132,9 @@ export interface EsApi {
   testConnection: (connectionId: string) => Promise<ConnectionTestResult>;
   getIndices: (connectionId: string) => Promise<IndexSummary[]>;
   getIndexFields: (connectionId: string, index: string) => Promise<IndexFieldOption[]>;
+  getIndexMetadata: (connectionId: string, index: string) => Promise<IndexMetadataResult>;
   searchDocuments: (payload: SearchRequestPayload) => Promise<SearchDocumentsResult>;
+  executeDslRequest: (payload: ExecuteDslRequestPayload) => Promise<ExecuteDslResult>;
   createDocument: (payload: CreateDocumentPayload) => Promise<SaveDocumentResult>;
   updateDocument: (payload: UpdateDocumentPayload) => Promise<SaveDocumentResult>;
   deleteDocument: (payload: DeleteDocumentPayload) => Promise<DeleteDocumentResult>;

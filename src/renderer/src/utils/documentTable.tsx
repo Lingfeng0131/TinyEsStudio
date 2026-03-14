@@ -161,7 +161,274 @@ function isNumericFieldType(fieldType: string | undefined): boolean {
   );
 }
 
-function normalizeValueByFieldType(value: unknown, fieldType: string | undefined): PrimitiveValue | undefined {
+function isDateFieldType(fieldType: string | undefined, field: string): boolean {
+  if (fieldType === 'date' || fieldType === 'date_nanos') {
+    return true;
+  }
+
+  const normalizedField = field.toLowerCase();
+  return normalizedField.includes('time') || normalizedField.includes('date');
+}
+
+function padNumber(value: number, length = 2): string {
+  return String(value).padStart(length, '0');
+}
+
+function formatJavaDatePattern(date: Date, pattern: string): string {
+  const tokenMap: Array<[string, string]> = [
+    ['yyyy', String(date.getFullYear())],
+    ['SSSSSSSSS', `${padNumber(date.getMilliseconds(), 3)}000000`],
+    ['SSS', padNumber(date.getMilliseconds(), 3)],
+    ['MM', padNumber(date.getMonth() + 1)],
+    ['dd', padNumber(date.getDate())],
+    ['HH', padNumber(date.getHours())],
+    ['mm', padNumber(date.getMinutes())],
+    ['ss', padNumber(date.getSeconds())],
+    ['M', String(date.getMonth() + 1)],
+    ['d', String(date.getDate())],
+    ['H', String(date.getHours())],
+    ['m', String(date.getMinutes())],
+    ['s', String(date.getSeconds())],
+    ['S', String(Math.floor(date.getMilliseconds() / 100))]
+  ];
+
+  let result = '';
+  let cursor = 0;
+
+  while (cursor < pattern.length) {
+    if (pattern[cursor] === '\'') {
+      cursor += 1;
+
+      while (cursor < pattern.length) {
+        if (pattern[cursor] === '\'') {
+          if (pattern[cursor + 1] === '\'') {
+            result += '\'';
+            cursor += 2;
+            continue;
+          }
+
+          cursor += 1;
+          break;
+        }
+
+        result += pattern[cursor];
+        cursor += 1;
+      }
+
+      continue;
+    }
+
+    const matchedToken = tokenMap.find(([token]) => pattern.startsWith(token, cursor));
+    if (matchedToken) {
+      result += matchedToken[1];
+      cursor += matchedToken[0].length;
+      continue;
+    }
+
+    result += pattern[cursor];
+    cursor += 1;
+  }
+
+  return result;
+}
+
+function inferDateFormatHint(sampleValue: string | undefined): string | undefined {
+  if (!sampleValue) {
+    return undefined;
+  }
+
+  const text = sampleValue.trim();
+  if (!text) {
+    return undefined;
+  }
+
+  if (/^\d{13}$/.test(text)) {
+    return 'epoch_millis';
+  }
+
+  if (/^\d{10}$/.test(text)) {
+    return 'epoch_second';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}Z$/.test(text)) {
+    return '__iso_z_nanos__';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(text)) {
+    return '__iso_z_millis__';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(text)) {
+    return '__iso_z_seconds__';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{9}$/.test(text)) {
+    return "yyyy-MM-dd'T'HH:mm:ss.SSSSSSSSS";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}$/.test(text)) {
+    return "yyyy-MM-dd'T'HH:mm:ss.SSS";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(text)) {
+    return "yyyy-MM-dd'T'HH:mm:ss";
+  }
+
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(text)) {
+    return 'yyyy-MM-dd HH:mm:ss';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return 'strict_date';
+  }
+
+  if (/^\d{8}$/.test(text)) {
+    return 'basic_date';
+  }
+
+  return undefined;
+}
+
+function resolveDateFormatHint(...candidates: Array<string | undefined>): string | undefined {
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    if (inferDateFormatHint(candidate)) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+}
+
+function formatIsoWithPrecision(date: Date, fractionDigits: 0 | 3 | 9): string {
+  const isoBase = date.toISOString().replace(/\.\d{3}Z$/, '');
+
+  if (fractionDigits === 0) {
+    return `${isoBase}Z`;
+  }
+
+  if (fractionDigits === 9) {
+    return `${isoBase}.${padNumber(date.getMilliseconds(), 3)}000000Z`;
+  }
+
+  return date.toISOString();
+}
+
+function formatDateByFieldFormat(
+  date: Date,
+  fieldType?: string,
+  fieldFormat?: string,
+  dateFormatHint?: string
+): string {
+  const preferredHint = inferDateFormatHint(dateFormatHint);
+
+  if (preferredHint === '__iso_z_nanos__') {
+    return formatIsoWithPrecision(date, 9);
+  }
+
+  if (preferredHint === '__iso_z_millis__') {
+    return formatIsoWithPrecision(date, 3);
+  }
+
+  if (preferredHint === '__iso_z_seconds__') {
+    return formatIsoWithPrecision(date, 0);
+  }
+
+  if (preferredHint && !preferredHint.startsWith('__')) {
+    return formatDateByFieldFormat(date, fieldType, preferredHint);
+  }
+
+  const formatCandidates = fieldFormat
+    ?.split('||')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const preferredFormat =
+    formatCandidates?.find((item) => item !== 'epoch_millis' && item !== 'epoch_second') ??
+    formatCandidates?.[0];
+
+  if (!preferredFormat) {
+    if (fieldType === 'date_nanos') {
+      return `${date.toISOString().replace('Z', '')}000000Z`;
+    }
+
+    return formatJavaDatePattern(date, 'yyyy-MM-dd HH:mm:ss');
+  }
+
+  if (preferredFormat === 'epoch_millis') {
+    return String(date.getTime());
+  }
+
+  if (preferredFormat === 'epoch_second') {
+    return String(Math.floor(date.getTime() / 1000));
+  }
+
+  if (
+    preferredFormat === 'strict_date_optional_time' ||
+    preferredFormat === 'date_optional_time' ||
+    preferredFormat === 'strict_date_time' ||
+    preferredFormat === 'strict_date_time_no_millis' ||
+    preferredFormat === 'strict_date_optional_time_nanos' ||
+    preferredFormat === 'date_optional_time_nanos'
+  ) {
+    if (fieldType === 'date_nanos' || preferredFormat.includes('nanos')) {
+      return `${date.toISOString().replace('Z', '')}000000Z`;
+    }
+
+    return date.toISOString();
+  }
+
+  if (preferredFormat === 'strict_date') {
+    return formatJavaDatePattern(date, 'yyyy-MM-dd');
+  }
+
+  if (preferredFormat === 'basic_date') {
+    return formatJavaDatePattern(date, 'yyyyMMdd');
+  }
+
+  return formatJavaDatePattern(date, preferredFormat);
+}
+
+function buildDatePlaceholder(fieldType?: string, fieldFormat?: string, dateFormatHint?: string): string {
+  const sampleDate = new Date(2026, 2, 14, 10, 0, 0, 123);
+  return `例如 ${formatDateByFieldFormat(sampleDate, fieldType, fieldFormat, dateFormatHint)}`;
+}
+
+function buildDateQuickOptions(
+  value: string,
+  fieldType?: string,
+  fieldFormat?: string,
+  dateFormatHint?: string
+): Array<{ label: string; value: string }> {
+  const now = new Date();
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+
+  const startOfYesterday = new Date(startOfToday);
+  startOfYesterday.setDate(startOfYesterday.getDate() - 1);
+
+  const options = [
+    { label: '现在', value: formatDateByFieldFormat(now, fieldType, fieldFormat, dateFormatHint) },
+    { label: '今天 00:00', value: formatDateByFieldFormat(startOfToday, fieldType, fieldFormat, dateFormatHint) },
+    { label: '今天 23:59', value: formatDateByFieldFormat(endOfToday, fieldType, fieldFormat, dateFormatHint) },
+    { label: '昨天 00:00', value: formatDateByFieldFormat(startOfYesterday, fieldType, fieldFormat, dateFormatHint) }
+  ];
+
+  if (value.trim()) {
+    options.unshift({ label: '保留当前值', value });
+  }
+
+  return options.filter(
+    (option, index, list) => list.findIndex((candidate) => candidate.value === option.value) === index
+  );
+}
+
+export function normalizeValueByFieldType(value: unknown, fieldType: string | undefined): PrimitiveValue | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -177,20 +444,7 @@ function normalizeValueByFieldType(value: unknown, fieldType: string | undefined
     }
     if (text === 'true' || text === '1') return true;
     if (text === 'false' || text === '0') return false;
-    throw new Error('布尔字段请输入 true / false');
-  }
-
-  if (isNumericFieldType(fieldType)) {
-    const text = String(value).trim();
-    if (!text) {
-      return undefined;
-    }
-
-    const parsed = Number(text);
-    if (Number.isNaN(parsed)) {
-      throw new Error('数字字段只能输入数字');
-    }
-    return parsed;
+    return String(value);
   }
 
   if (value === '') {
@@ -207,16 +461,19 @@ function normalizeValueByFieldType(value: unknown, fieldType: string | undefined
 function commitEditorChange(
   props: RenderEditCellProps<GridRow, unknown>,
   field: string,
-  nextValue: PrimitiveValue | string
+  nextValue: PrimitiveValue | string,
+  commitChanges = false
 ): void {
-  props.onRowChange({ ...props.row, [field]: nextValue });
+  props.onRowChange({ ...props.row, [field]: nextValue }, commitChanges);
 }
 
 function renderEditor(
   props: RenderEditCellProps<GridRow, unknown>,
   field: string,
   originalValue: PrimitiveValue | undefined,
-  fieldType?: string
+  fieldType?: string,
+  fieldFormat?: string,
+  fieldDateFormatHint?: string
 ) {
   if (typeof originalValue === 'boolean' || fieldType === 'boolean') {
     return (
@@ -225,8 +482,14 @@ function renderEditor(
         autoFocus
         value={String(props.row[field] ?? originalValue ?? '')}
         onChange={(event) => {
-          commitEditorChange(props, field, event.target.value === 'true');
-          props.onClose(true, true);
+          const nextValue = event.target.value;
+          commitEditorChange(props, field, nextValue === '' ? '' : nextValue === 'true', true);
+        }}
+        onBlur={() => props.onClose(false, true)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            props.onClose(false, true);
+          }
         }}
       >
         <option value="">请选择</option>
@@ -236,8 +499,18 @@ function renderEditor(
     );
   }
 
-  const inputType = typeof originalValue === 'number' || isNumericFieldType(fieldType) ? 'number' : 'text';
   const value = props.row[field] === null ? '' : String(props.row[field] ?? '');
+  const isDateField = isDateFieldType(fieldType, field);
+  const dateSuggestionId = `grid-date-suggestions-${props.row._rowKey.replace(/[^a-zA-Z0-9_-]/g, '-')}-${field.replace(
+    /[^a-zA-Z0-9_-]/g,
+    '-'
+  )}`;
+  const activeDateFormatHint = resolveDateFormatHint(
+    typeof props.row[field] === 'string' ? String(props.row[field]).trim() : undefined,
+    typeof originalValue === 'string' ? originalValue.trim() : undefined,
+    fieldDateFormatHint
+  );
+  const dateQuickOptions = buildDateQuickOptions(value, fieldType, fieldFormat, activeDateFormatHint);
 
   const handleChange = (
     event: ChangeEvent<HTMLInputElement>
@@ -246,11 +519,62 @@ function renderEditor(
     commitEditorChange(props, field, nextValue);
   };
 
+  if (isDateField) {
+    return (
+      <div className="grid-date-editor-shell">
+        <input
+          className="grid-editor grid-editor-date"
+          autoFocus
+          type="text"
+          list={dateSuggestionId}
+          value={value}
+          placeholder={buildDatePlaceholder(fieldType, fieldFormat, activeDateFormatHint)}
+          onChange={handleChange}
+          onBlur={() => props.onClose(true, true)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              props.onClose(true, true);
+            }
+            if (event.key === 'Escape') {
+              props.onClose(false, true);
+            }
+          }}
+        />
+        <datalist id={dateSuggestionId}>
+          {dateQuickOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </datalist>
+        <div className="grid-date-editor-actions">
+          {dateQuickOptions.map((option) => (
+            <button
+              key={option.label}
+              type="button"
+              className="grid-date-chip"
+              tabIndex={-1}
+              onMouseDown={(event) => {
+                event.preventDefault();
+              }}
+              onClick={() => {
+                commitEditorChange(props, field, option.value);
+                props.onClose(true, true);
+              }}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <input
       className="grid-editor"
       autoFocus
-      type={inputType}
+      type="text"
       value={value}
       onChange={handleChange}
       onBlur={() => props.onClose(true, true)}
@@ -271,9 +595,12 @@ export function buildColumns(
   dirtyState: DirtyState,
   originalMap: Record<string, EsDocument>,
   fieldTypeMap: Record<string, string>,
-  checkedRowKey: string | undefined,
+  fieldFormatMap: Record<string, string>,
+  fieldDateFormatHintMap: Record<string, string>,
+  checkedRowKeys: string[],
   onToggleCheck: (rowKey: string, checked: boolean) => void
 ): Column<GridRow>[] {
+  const checkedRowKeySet = new Set(checkedRowKeys);
   const fixedColumns: Column<GridRow>[] = [
     {
       key: '_deleteCheck',
@@ -286,7 +613,7 @@ export function buildColumns(
           <input
             className="grid-delete-checkbox"
             type="checkbox"
-            checked={row._rowKey === checkedRowKey}
+            checked={checkedRowKeySet.has(row._rowKey)}
             aria-label={`勾选文档 ${row._id} 以允许删除`}
             onChange={(event) => {
               event.stopPropagation();
@@ -352,7 +679,9 @@ export function buildColumns(
           props as RenderEditCellProps<GridRow, unknown>,
           field,
           getPrimitiveValueByPath(originalMap[props.row._id]?._source ?? {}, field),
-          fieldTypeMap[field]
+          fieldTypeMap[field],
+          fieldFormatMap[field],
+          fieldDateFormatHintMap[field]
         )
     };
   });
@@ -453,17 +782,22 @@ export function applyChangesToDocumentSource(
 export function buildDocumentFromGridRow(
   row: GridRow,
   fields: string[],
-  fieldTypeMap: Record<string, string>
+  _fieldTypeMap: Record<string, string>
 ): Record<string, unknown> {
   const document: Record<string, unknown> = {};
 
   fields.forEach((field) => {
-    const normalized = normalizeValueByFieldType(row[field], fieldTypeMap[field]);
-    if (normalized === undefined) {
+    const rawValue = row[field];
+    if (rawValue === undefined || rawValue === '') {
       return;
     }
 
-    setNestedValue(document, field, normalized);
+    if (rawValue === null || typeof rawValue === 'string' || typeof rawValue === 'number' || typeof rawValue === 'boolean') {
+      setNestedValue(document, field, rawValue);
+      return;
+    }
+
+    setNestedValue(document, field, String(rawValue));
   });
 
   return document;

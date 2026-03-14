@@ -190,7 +190,7 @@ export function ConnectionSidebar({
               </Text>
             </div>
           </Group>
-          {loadingIndices ? <Badge color="mint" variant="light">加载中</Badge> : null}
+          {loadingIndices ? <Badge color="pink" variant="light">加载中</Badge> : null}
         </Group>
         <Collapse in={!indicesCollapsed}>
           <Stack gap="md">
@@ -241,7 +241,7 @@ export function ConnectionSidebar({
                               文档 {index.docCount ?? '-'} · {index.health ?? 'unknown'}
                             </Text>
                           </Stack>
-                          <IconPlugConnected size={16} color={active ? '#4C6EF5' : '#8f96b3'} />
+                          <IconPlugConnected size={16} color={active ? '#df5b91' : '#b194aa'} />
                         </Group>
                       </Card>
                     );

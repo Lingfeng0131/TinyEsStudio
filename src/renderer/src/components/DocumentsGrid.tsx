@@ -11,8 +11,10 @@ interface DocumentsGridProps {
   documents: EsDocument[];
   dirtyState: DirtyState;
   selectedRowKey?: string;
-  checkedRowKey?: string;
+  checkedRowKeys: string[];
   fieldTypeMap: Record<string, string>;
+  fieldFormatMap: Record<string, string>;
+  fieldDateFormatHintMap: Record<string, string>;
   scrollToTopSignal: number;
   onRowsChange: (rows: GridRow[], change: RowsChangeData<GridRow, unknown>) => void;
   onSelectRow: (rowKey: string) => void;
@@ -26,8 +28,10 @@ export function DocumentsGrid({
   documents,
   dirtyState,
   selectedRowKey,
-  checkedRowKey,
+  checkedRowKeys,
   fieldTypeMap,
+  fieldFormatMap,
+  fieldDateFormatHintMap,
   scrollToTopSignal,
   onRowsChange,
   onSelectRow,
@@ -44,8 +48,18 @@ export function DocumentsGrid({
   );
 
   const columns = useMemo(
-    () => buildColumns(fields, dirtyState, originalMap, fieldTypeMap, checkedRowKey, onToggleDeleteCheck),
-    [checkedRowKey, dirtyState, fieldTypeMap, fields, onToggleDeleteCheck, originalMap]
+    () =>
+      buildColumns(
+        fields,
+        dirtyState,
+        originalMap,
+        fieldTypeMap,
+        fieldFormatMap,
+        fieldDateFormatHintMap,
+        checkedRowKeys,
+        onToggleDeleteCheck
+      ),
+    [checkedRowKeys, dirtyState, fieldDateFormatHintMap, fieldFormatMap, fieldTypeMap, fields, onToggleDeleteCheck, originalMap]
   );
 
   useEffect(() => {

@@ -3,8 +3,12 @@ import type {
   ConnectionConfig,
   ConnectionTestResult,
   DeleteDocumentResult,
+  ExecuteDslRequestPayload,
+  ExecuteDslResult,
+  FilterJoinMode,
   FilterOperator,
   IndexFieldOption,
+  IndexMetadataResult,
   IndexSummary,
   PrimitiveValue,
   QueryFilter,
@@ -48,6 +52,7 @@ function collectFieldMappings(
       fields.push({
         name: fieldName,
         type: fieldType,
+        format: typeof mapping.format === 'string' ? mapping.format : undefined,
         filterScope
       });
     }
@@ -331,20 +336,9 @@ function buildSearchBody(
   payload: SearchRequestPayload,
   fieldOptions: Record<string, IndexFieldOption>
 ): Record<string, unknown> {
-  if (payload.mode === 'json') {
-    if (!payload.jsonQuery?.trim()) {
-      return { query: { match_all: {} } };
-    }
-
-    try {
-      return JSON.parse(payload.jsonQuery) as Record<string, unknown>;
-    } catch {
-      throw new Error('JSON 查询格式不正确');
-    }
-  }
-
   const keyword = payload.keyword?.trim();
   const filterClauses = buildFilterClauses(payload.filters, fieldOptions);
+  const filterJoinMode: FilterJoinMode = payload.filterJoinMode === 'or' ? 'or' : 'and';
 
   if (!keyword && filterClauses.length === 0) {
     return {
@@ -363,7 +357,16 @@ function buildSearchBody(
     query: {
       bool: {
         ...(mustClauses.length > 0 ? { must: mustClauses } : { must: [{ match_all: {} }] }),
-        ...(filterClauses.length > 0 ? { filter: filterClauses } : {})
+        ...(filterClauses.length > 0
+          ? filterJoinMode === 'or'
+            ? {
+                should: filterClauses,
+                minimum_should_match: 1
+              }
+            : {
+                filter: filterClauses
+              }
+          : {})
       }
     }
   };
@@ -467,6 +470,26 @@ export async function fetchIndexFields(
   });
 }
 
+export async function fetchIndexMetadata(
+  connection: ConnectionConfig,
+  index: string
+): Promise<IndexMetadataResult> {
+  const client = createClient(connection);
+  const [settingsResult, mappingResult] = await Promise.all([
+    client.indices.getSettings({ index }),
+    client.indices.getMapping({ index })
+  ]);
+
+  const settings = settingsResult[index]?.settings;
+  const mappings = mappingResult[index]?.mappings;
+
+  return {
+    index,
+    settings: settings && typeof settings === 'object' ? (settings as Record<string, unknown>) : {},
+    mappings: mappings && typeof mappings === 'object' ? (mappings as Record<string, unknown>) : {}
+  };
+}
+
 export async function searchDocuments(
   connection: ConnectionConfig,
   payload: SearchRequestPayload
@@ -498,6 +521,89 @@ export async function searchDocuments(
     documents,
     total: totalValue
   };
+}
+
+function stringifyDslPayload(payload: unknown): string {
+  if (typeof payload === 'string') {
+    return payload;
+  }
+
+  if (payload === undefined) {
+    return '';
+  }
+
+  try {
+    return JSON.stringify(payload, null, 2);
+  } catch {
+    return String(payload);
+  }
+}
+
+export async function executeDslRequest(
+  connection: ConnectionConfig,
+  payload: ExecuteDslRequestPayload
+): Promise<ExecuteDslResult> {
+  const client = createClient(connection);
+  const method = payload.method.trim().toUpperCase();
+  const path = payload.path.trim();
+  const bodyText = payload.bodyText?.trim();
+  let body: Record<string, unknown> | Array<unknown> | string | undefined;
+
+  if (bodyText) {
+    try {
+      const parsedBody = JSON.parse(bodyText) as unknown;
+
+      if (parsedBody === null) {
+        throw new Error('请求体暂不支持单独的 null');
+      }
+
+      if (typeof parsedBody === 'string' || typeof parsedBody === 'number' || typeof parsedBody === 'boolean') {
+        body = JSON.stringify(parsedBody);
+      } else {
+        body = parsedBody as Record<string, unknown> | Array<unknown>;
+      }
+    } catch {
+      throw new Error('请求体不是合法 JSON');
+    }
+  }
+
+  try {
+    const result = await client.transport.request<Record<string, unknown>>(
+      {
+        method,
+        path,
+        ...(body !== undefined ? { body } : {})
+      },
+      { meta: true }
+    );
+
+    return {
+      statusCode: typeof result.statusCode === 'number' ? result.statusCode : 200,
+      responseBody: stringifyDslPayload(result.body)
+    };
+  } catch (error) {
+    const responseError = error as {
+      statusCode?: number;
+      body?: unknown;
+      meta?: {
+        statusCode?: number;
+        body?: unknown;
+      };
+      message?: string;
+    };
+
+    const statusCode = responseError.statusCode ?? responseError.meta?.statusCode;
+    const errorBody = responseError.body ?? responseError.meta?.body;
+
+    if (typeof statusCode === 'number') {
+      return {
+        statusCode,
+        responseBody: errorBody !== undefined ? stringifyDslPayload(errorBody) : responseError.message ?? '请求失败'
+      };
+    }
+
+    throw error;
+  }
 }
 
 export async function createDocument(

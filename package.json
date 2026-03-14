@@ -19,8 +19,10 @@
     "@mantine/core": "^8.3.6",
     "@mantine/hooks": "^8.3.6",
     "@mantine/notifications": "^8.3.6",
+    "@monaco-editor/react": "^4.7.0",
     "@tabler/icons-react": "^3.35.0",
     "apache-arrow": "^21.1.0",
+    "monaco-editor": "^0.55.1",
     "react": "^19.2.0",
     "react-data-grid": "^7.0.0-beta.59",
     "react-dom": "^19.2.0"

@@ -98,7 +98,7 @@ const theme = createTheme({
   }
 });
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '1.0.0';
 const APP_AUTHOR = 'Lingfeng';
 
 function normalizeConnectionTestMessage(message: string): string {
@@ -1244,17 +1244,6 @@ function AppContent({
                   </UnstyledButton>
                 </Tooltip>
 
-                <Tooltip label="关于 Tiny ES Studio" withArrow>
-                  <UnstyledButton
-                    type="button"
-                    className="header-action-button header-action-button-icon"
-                    aria-label="关于 Tiny ES Studio"
-                    onClick={() => setAboutOpened(true)}
-                  >
-                    <IconInfoCircle size={16} />
-                  </UnstyledButton>
-                </Tooltip>
-
                 <Tooltip label={themeMode === 'dark' ? '切回浅色模式' : '切换暗黑模式'} withArrow>
                   <UnstyledButton
                     type="button"
@@ -1263,6 +1252,17 @@ function AppContent({
                     onClick={onToggleTheme}
                   >
                     {themeMode === 'dark' ? <IconSunHigh size={16} /> : <IconMoonStars size={16} />}
+                  </UnstyledButton>
+                </Tooltip>
+
+                <Tooltip label="关于 Tiny ES Studio" withArrow>
+                  <UnstyledButton
+                    type="button"
+                    className="header-action-button header-action-button-icon"
+                    aria-label="关于 Tiny ES Studio"
+                    onClick={() => setAboutOpened(true)}
+                  >
+                    <IconInfoCircle size={16} />
                   </UnstyledButton>
                 </Tooltip>
               </div>

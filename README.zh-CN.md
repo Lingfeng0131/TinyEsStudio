@@ -124,8 +124,8 @@ npm run dist:win
 
 默认构建产物输出到 `release/` 目录：
 
-- macOS：`Tiny ES Studio-0.1.0-macOS-arm64.dmg`
-- Windows：`Tiny ES Studio-0.1.0-win-x64.exe`
+- macOS：`Tiny ES Studio-1.0.0-macOS-arm64.dmg`
+- Windows：`Tiny ES Studio-1.0.0-win-x64.exe`
 
 ## 使用说明
 

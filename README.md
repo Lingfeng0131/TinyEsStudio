@@ -124,8 +124,8 @@ npm run dist:win
 
 Build artifacts are generated in the `release/` directory by default:
 
-- macOS: `Tiny ES Studio-0.1.0-macOS-arm64.dmg`
-- Windows: `Tiny ES Studio-0.1.0-win-x64.exe`
+- macOS: `Tiny ES Studio-1.0.0-macOS-arm64.dmg`
+- Windows: `Tiny ES Studio-1.0.0-win-x64.exe`
 
 ## Usage
 

@@ -1,6 +1,6 @@
 {
   "name": "tiny-es-studio",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "一个可爱但专业的 Elasticsearch 桌面端轻量工作台",
   "main": "./out/main/index.js",
   "author": "Lingfeng",

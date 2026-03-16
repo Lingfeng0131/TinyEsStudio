@@ -1942,14 +1942,16 @@ body {
 
 .json-block {
   display: block;
-  white-space: pre-wrap;
-  word-break: break-word;
+  white-space: pre;
+  word-break: normal;
+  overflow-wrap: normal;
   padding: 16px;
   border-radius: 20px;
   background: linear-gradient(180deg, #fffafd, #fff4f9);
   border: 1px solid #ece8f5;
   font-size: 12px;
   line-height: 1.7;
+  overflow: auto;
 }
 
 .sidebar-heading-title,

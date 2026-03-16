@@ -89,15 +89,17 @@ export function toGridRow(document: EsDocument, fields: string[]): GridRow {
 }
 
 function inferColumnSizing(field: string, fieldType?: string): {
-  width: string;
+  width: number;
   minWidth: number;
+  maxWidth?: number;
 } {
   const normalizedField = field.toLowerCase();
 
   if (field === '_id') {
     return {
-      width: '1.3fr',
-      minWidth: 220
+      width: 240,
+      minWidth: 220,
+      maxWidth: 320
     };
   }
 
@@ -107,8 +109,9 @@ function inferColumnSizing(field: string, fieldType?: string): {
     fieldType === 'date'
   ) {
     return {
-      width: '1.15fr',
-      minWidth: 170
+      width: 190,
+      minWidth: 170,
+      maxWidth: 260
     };
   }
 
@@ -118,8 +121,9 @@ function inferColumnSizing(field: string, fieldType?: string): {
     normalizedField.includes('tel')
   ) {
     return {
-      width: '1.1fr',
-      minWidth: 160
+      width: 170,
+      minWidth: 160,
+      maxWidth: 240
     };
   }
 
@@ -133,8 +137,28 @@ function inferColumnSizing(field: string, fieldType?: string): {
     normalizedField.includes('price')
   ) {
     return {
-      width: '0.95fr',
-      minWidth: 96
+      width: 112,
+      minWidth: 96,
+      maxWidth: 160
+    };
+  }
+
+  if (
+    normalizedField.includes('error') ||
+    normalizedField.includes('desc') ||
+    normalizedField.includes('message') ||
+    normalizedField.includes('json') ||
+    normalizedField.includes('body') ||
+    normalizedField.includes('content') ||
+    normalizedField.includes('response') ||
+    normalizedField.includes('request') ||
+    normalizedField.includes('remark') ||
+    normalizedField.includes('reason')
+  ) {
+    return {
+      width: 280,
+      minWidth: 200,
+      maxWidth: 420
     };
   }
 
@@ -144,14 +168,16 @@ function inferColumnSizing(field: string, fieldType?: string): {
     normalizedField.includes('nick')
   ) {
     return {
-      width: '1fr',
-      minWidth: 140
+      width: 160,
+      minWidth: 140,
+      maxWidth: 240
     };
   }
 
   return {
-    width: '1fr',
-    minWidth: 150
+    width: 180,
+    minWidth: 150,
+    maxWidth: 260
   };
 }
 
@@ -601,6 +627,7 @@ export function buildColumns(
   onToggleCheck: (rowKey: string, checked: boolean) => void
 ): Column<GridRow>[] {
   const checkedRowKeySet = new Set(checkedRowKeys);
+  const idSizing = inferColumnSizing('_id');
   const fixedColumns: Column<GridRow>[] = [
     {
       key: '_deleteCheck',
@@ -632,10 +659,14 @@ export function buildColumns(
       editable: (row) => row._isDraft === true,
       resizable: true,
       frozen: true,
-      width: inferColumnSizing('_id').width,
-      minWidth: inferColumnSizing('_id').minWidth,
+      width: idSizing.width,
+      minWidth: idSizing.minWidth,
+      maxWidth: idSizing.maxWidth,
       renderCell: ({ row }) => (
-        <div className={row._isDraft ? 'grid-cell grid-cell-draft' : 'grid-cell'}>
+        <div
+          className={row._isDraft ? 'grid-cell grid-cell-draft' : 'grid-cell'}
+          title={String(row._id ?? '')}
+        >
           {String(row._id ?? '')}
         </div>
       ),
@@ -653,26 +684,34 @@ export function buildColumns(
       resizable: true,
       width: sizing.width,
       minWidth: sizing.minWidth,
+      maxWidth: sizing.maxWidth,
       renderCell: ({ row }) => {
-      const rowDirty = dirtyState[row._id];
-      const isDirty = Boolean(rowDirty && field in rowDirty);
-      const rawValue = row[field];
-      const originalValue = getPrimitiveValueByPath(originalMap[row._id]?._source ?? {}, field);
-      const isBoolean = typeof originalValue === 'boolean' || fieldTypeMap[field] === 'boolean';
+        const rowDirty = dirtyState[row._id];
+        const isDirty = Boolean(rowDirty && field in rowDirty);
+        const rawValue = row[field];
+        const originalValue = getPrimitiveValueByPath(originalMap[row._id]?._source ?? {}, field);
+        const isBoolean = typeof originalValue === 'boolean' || fieldTypeMap[field] === 'boolean';
+        const displayValue = String(rawValue ?? '');
 
-      if (isBoolean) {
+        if (isBoolean) {
+          return (
+            <div
+              className={isDirty || row._isDraft ? 'grid-cell grid-cell-dirty' : 'grid-cell'}
+              title={displayValue}
+            >
+              {rawValue === true ? 'true' : rawValue === false ? 'false' : ''}
+            </div>
+          );
+        }
+
         return (
-          <div className={isDirty || row._isDraft ? 'grid-cell grid-cell-dirty' : 'grid-cell'}>
-            {rawValue === true ? 'true' : rawValue === false ? 'false' : ''}
+          <div
+            className={isDirty || row._isDraft ? 'grid-cell grid-cell-dirty' : 'grid-cell'}
+            title={displayValue}
+          >
+            {displayValue}
           </div>
         );
-      }
-
-      return (
-        <div className={isDirty || row._isDraft ? 'grid-cell grid-cell-dirty' : 'grid-cell'}>
-          {String(rawValue ?? '')}
-        </div>
-      );
       },
       renderEditCell: (props) =>
         renderEditor(

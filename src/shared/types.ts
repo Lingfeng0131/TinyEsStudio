@@ -49,6 +49,14 @@ export interface IndexFieldOption {
   type: string;
   format?: string;
   filterScope?: IndexFieldFilterScope;
+  sortable?: boolean;
+  sortField?: string;
+  sortFieldType?: string;
+}
+
+export interface SearchSortOption {
+  field: string;
+  direction: 'asc' | 'desc';
 }
 
 export interface IndexMetadataResult {
@@ -66,6 +74,7 @@ export interface SearchRequestPayload {
   from?: number;
   filters?: QueryFilter[];
   filterJoinMode?: FilterJoinMode;
+  sort?: SearchSortOption;
 }
 
 export interface ExecuteDslRequestPayload {

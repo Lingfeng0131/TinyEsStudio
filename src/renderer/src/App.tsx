@@ -30,7 +30,9 @@ import {
   IconSunHigh,
   IconTerminal2,
   IconTable,
-  IconTrash
+  IconTrash,
+  IconArrowsSort,
+  IconX
 } from '@tabler/icons-react';
 import type {
   ConnectionConfig,
@@ -41,7 +43,8 @@ import type {
   IndexMetadataResult,
   IndexSummary,
   QueryFilter,
-  SaveDocumentResult
+  SaveDocumentResult,
+  SearchSortOption
 } from '../../shared/types';
 import { ConnectionSidebar } from './components/ConnectionSidebar';
 import { DslWorkspace } from './components/DslWorkspace';
@@ -50,7 +53,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { JsonDetailPanel } from './components/JsonDetailPanel';
 import { QueryToolbar } from './components/QueryToolbar';
 import appIcon from './assets/app-icon.png';
-import type { DirtyState, GridRow } from './types';
+import type { DirtyState, GridRow, GridSortState } from './types';
 import { showAppNotification } from './utils/appNotifications';
 import {
   applyChangesToDocumentSource,
@@ -100,6 +103,21 @@ const theme = createTheme({
 
 const APP_VERSION = '1.0.1';
 const APP_AUTHOR = 'Lingfeng';
+
+function toSearchSortOption(sortState: GridSortState | undefined): SearchSortOption | undefined {
+  if (!sortState) {
+    return undefined;
+  }
+
+  return {
+    field: sortState.columnKey,
+    direction: sortState.direction === 'DESC' ? 'desc' : 'asc'
+  };
+}
+
+function getSortDirectionLabel(direction: GridSortState['direction']): string {
+  return direction === 'DESC' ? '降序' : '升序';
+}
 
 function normalizeConnectionTestMessage(message: string): string {
   if (
@@ -214,6 +232,7 @@ function AppContent({
   const [filters, setFilters] = useState<QueryFilter[]>([createFilter()]);
   const [filterJoinMode, setFilterJoinMode] = useState<FilterJoinMode>('and');
   const [size, setSize] = useState(50);
+  const [sortState, setSortState] = useState<GridSortState>();
   const [documents, setDocuments] = useState<EsDocument[]>([]);
   const [rows, setRows] = useState<GridRow[]>([]);
   const [dirtyState, setDirtyState] = useState<DirtyState>({});
@@ -285,6 +304,20 @@ function AppContent({
     [indexFields]
   );
 
+  const sortableFieldMap = useMemo(
+    () =>
+      indexFields.reduce<Record<string, boolean>>((accumulator, field) => {
+        accumulator[field.name] = field.sortable === true;
+        return accumulator;
+      }, {}),
+    [indexFields]
+  );
+
+  const sortableColumnKeys = useMemo(
+    () => indexFields.filter((field) => field.sortable === true).map((field) => field.name),
+    [indexFields]
+  );
+
   const displayFields = useMemo(() => {
     const fieldSet = new Set<string>(collectFieldNames(documents));
     indexFields.forEach((field) => {
@@ -312,6 +345,14 @@ function AppContent({
   );
 
   const draftRows = useMemo(() => rows.filter((row) => row._isDraft), [rows]);
+
+  const activeSortSummary = useMemo(() => {
+    if (!sortState) {
+      return undefined;
+    }
+
+    return `${sortState.columnKey} ${getSortDirectionLabel(sortState.direction)}`;
+  }, [sortState]);
 
   const dirtyCount = useMemo(
     () =>
@@ -426,11 +467,24 @@ function AppContent({
     void loadIndexMetadata(selectedConnectionId, selectedIndex);
   }, [selectedConnectionId, selectedIndex]);
 
+  useEffect(() => {
+    if (!sortState) {
+      return;
+    }
+
+    if (sortableFieldMap[sortState.columnKey]) {
+      return;
+    }
+
+    setSortState(undefined);
+  }, [sortState, sortableFieldMap]);
+
   function resetQueryControls(): void {
     setKeyword('');
     setFilters([createFilter()]);
     setFilterJoinMode('and');
     setSize(50);
+    setSortState(undefined);
     setCurrentPage(1);
     setQueryPanelCollapsed(false);
   }
@@ -600,6 +654,7 @@ function AppContent({
     setSelectedRowKey(undefined);
     setCheckedRowKeys([]);
     setSearchTotal(0);
+    setSortState(undefined);
     setCurrentPage(1);
     setQueryPanelCollapsed(false);
   }
@@ -634,6 +689,7 @@ function AppContent({
       filters?: QueryFilter[];
       filterJoinMode?: FilterJoinMode;
       size?: number;
+      sort?: GridSortState;
       collapseSidebar?: boolean;
       collapseQueryPanel?: boolean;
     }
@@ -645,6 +701,8 @@ function AppContent({
     const effectiveFilters = options?.filters ?? filters;
     const effectiveFilterJoinMode = options?.filterJoinMode ?? filterJoinMode;
     const effectiveSize = options?.size ?? size;
+    const hasExplicitSort = options ? Object.prototype.hasOwnProperty.call(options, 'sort') : false;
+    const effectiveSort = hasExplicitSort ? options?.sort : sortState;
 
     if (!effectiveConnectionId) {
       showAppNotification({
@@ -683,7 +741,8 @@ function AppContent({
         filters: effectiveFilters,
         filterJoinMode: effectiveFilterJoinMode,
         size: effectiveSize,
-        from: (safePage - 1) * effectiveSize
+        from: (safePage - 1) * effectiveSize,
+        sort: toSearchSortOption(effectiveSort)
       });
       if (requestId !== searchRequestSeqRef.current) {
         return;
@@ -696,18 +755,24 @@ function AppContent({
       setRows(nextRows);
       setDirtyState({});
       setSelectedRowKey((current) => {
-        if (current && preservedDraftRows.some((row) => row._rowKey === current)) {
+        if (current && nextRows.some((row) => row._rowKey === current)) {
           return current;
         }
         return nextRows[0]?._rowKey;
       });
       setCheckedRowKeys((current) =>
-        current.filter((rowKey) => preservedDraftRows.some((row) => row._rowKey === rowKey))
+        current.filter((rowKey) => nextRows.some((row) => row._rowKey === rowKey))
       );
       setSearchTotal(result.total);
       setCurrentPage(safePage);
       if (effectiveSize !== size) {
         setSize(effectiveSize);
+      }
+      if (
+        effectiveSort?.columnKey !== sortState?.columnKey ||
+        effectiveSort?.direction !== sortState?.direction
+      ) {
+        setSortState(effectiveSort);
       }
       if (options?.collapseQueryPanel !== false) {
         setQueryPanelCollapsed(true);
@@ -717,7 +782,7 @@ function AppContent({
         id: 'search-complete',
         color: 'pink',
         title: '查询完成',
-        message: `第 ${safePage} 页 · 已加载 ${result.documents.length} 条文档`
+        message: `第 ${safePage} 页 · 已加载 ${result.documents.length} 条文档${effectiveSort ? ` · 排序：${effectiveSort.columnKey} ${getSortDirectionLabel(effectiveSort.direction)}` : ''}`
       });
     } catch (error) {
       if (requestId !== searchRequestSeqRef.current) {
@@ -729,6 +794,32 @@ function AppContent({
         setQuerying(false);
       }
     }
+  }
+
+  async function handleSortChange(nextSortState: GridSortState | undefined): Promise<void> {
+    if (querying) {
+      return;
+    }
+
+    if (dirtyCount > 0) {
+      showAppNotification({
+        id: 'sort-guard-dirty',
+        color: 'yellow',
+        title: '请先保存修改',
+        message: '当前表格还有未保存编辑，排序会重新查询数据。请先保存后再排序。'
+      });
+      return;
+    }
+
+    if (!selectedConnectionId || !selectedIndex) {
+      setSortState(nextSortState);
+      return;
+    }
+
+    await handleSearch(1, {
+      preserveDraftRows: draftRows,
+      sort: nextSortState
+    });
   }
 
   async function handleExecuteDsl(): Promise<void> {
@@ -1383,6 +1474,7 @@ function AppContent({
                       keyword: '',
                       filters: nextFilters,
                       size: 50,
+                      sort: undefined,
                       preserveDraftRows: [],
                       collapseSidebar: true
                     });
@@ -1438,6 +1530,17 @@ function AppContent({
                           <Text size="sm" c="dimmed" className="grid-toolbar-count">
                             共 {searchTotal} 条
                           </Text>
+                          {activeSortSummary ? (
+                            <Group gap={6} wrap="nowrap" className="grid-toolbar-sort-pill">
+                              <IconArrowsSort size={14} />
+                              <span>{activeSortSummary}</span>
+                            </Group>
+                          ) : (
+                            <Group gap={6} wrap="nowrap" className="grid-toolbar-sort-hint">
+                              <IconArrowsSort size={14} />
+                              <span>点击表头可排序</span>
+                            </Group>
+                          )}
                         </>
                       ) : (
                         <Text size="sm" c="dimmed">
@@ -1515,6 +1618,20 @@ function AppContent({
                     </div>
 
                     <Group gap="xs" align="center" wrap="nowrap" className="grid-toolbar-trailing">
+                      {sortState ? (
+                        <Tooltip label="清除当前排序" withArrow>
+                          <ActionIcon
+                            size={34}
+                            radius="xl"
+                            variant="transparent"
+                            disabled={querying}
+                            className="grid-toolbar-icon-button"
+                            onClick={() => void handleSortChange(undefined)}
+                          >
+                            <IconX size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      ) : null}
                       <Tooltip label="新增一行" withArrow>
                         <ActionIcon
                           size={34}
@@ -1590,7 +1707,10 @@ function AppContent({
                     fieldFormatMap={fieldFormatMap}
                     fieldDateFormatHintMap={fieldDateFormatHintMap}
                     scrollToTopSignal={gridScrollToTopSignal}
+                    sortState={sortState}
+                    sortableColumnKeys={sortableColumnKeys}
                     onRowsChange={(nextRows) => handleRowsChange(nextRows)}
+                    onSortChange={(nextSortState) => void handleSortChange(nextSortState)}
                     onSelectRow={handleSelectRow}
                     onToggleDeleteCheck={handleToggleDeleteCheck}
                   />

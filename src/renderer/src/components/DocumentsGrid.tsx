@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { DataGrid, type CellMouseArgs, type RowsChangeData } from 'react-data-grid';
+import { DataGrid, type CellMouseArgs, type RowsChangeData, type SortColumn } from 'react-data-grid';
 import type { EsDocument } from '../../../shared/types';
-import type { DirtyState, GridRow } from '../types';
+import type { DirtyState, GridRow, GridSortState } from '../types';
 import { buildColumns } from '../utils/documentTable';
 
 interface DocumentsGridProps {
@@ -16,7 +16,10 @@ interface DocumentsGridProps {
   fieldFormatMap: Record<string, string>;
   fieldDateFormatHintMap: Record<string, string>;
   scrollToTopSignal: number;
+  sortState?: GridSortState;
+  sortableColumnKeys: string[];
   onRowsChange: (rows: GridRow[], change: RowsChangeData<GridRow, unknown>) => void;
+  onSortChange: (sortState?: GridSortState) => void;
   onSelectRow: (rowKey: string) => void;
   onToggleDeleteCheck: (rowKey: string, checked: boolean) => void;
 }
@@ -33,11 +36,15 @@ export function DocumentsGrid({
   fieldFormatMap,
   fieldDateFormatHintMap,
   scrollToTopSignal,
+  sortState,
+  sortableColumnKeys,
   onRowsChange,
+  onSortChange,
   onSelectRow,
   onToggleDeleteCheck
 }: DocumentsGridProps) {
   const gridShellRef = useRef<HTMLDivElement | null>(null);
+  const sortableColumnKeySet = useMemo(() => new Set(sortableColumnKeys), [sortableColumnKeys]);
   const originalMap = useMemo(
     () =>
       documents.reduce<Record<string, EsDocument>>((accumulator, document) => {
@@ -56,10 +63,26 @@ export function DocumentsGrid({
         fieldTypeMap,
         fieldFormatMap,
         fieldDateFormatHintMap,
+        sortableColumnKeySet,
         checkedRowKeys,
         onToggleDeleteCheck
       ),
-    [checkedRowKeys, dirtyState, fieldDateFormatHintMap, fieldFormatMap, fieldTypeMap, fields, onToggleDeleteCheck, originalMap]
+    [
+      checkedRowKeys,
+      dirtyState,
+      fieldDateFormatHintMap,
+      fieldFormatMap,
+      fieldTypeMap,
+      fields,
+      onToggleDeleteCheck,
+      originalMap,
+      sortableColumnKeySet
+    ]
+  );
+
+  const sortColumns = useMemo<readonly SortColumn[]>(
+    () => (sortState ? [sortState] : []),
+    [sortState]
   );
 
   useEffect(() => {
@@ -83,6 +106,20 @@ export function DocumentsGrid({
         rows={rows}
         rowKeyGetter={(row) => row._rowKey}
         onRowsChange={onRowsChange}
+        sortColumns={sortColumns}
+        onSortColumnsChange={(nextSortColumns) => {
+          const nextSortColumn = nextSortColumns.at(-1);
+
+          if (!nextSortColumn) {
+            onSortChange(undefined);
+            return;
+          }
+
+          onSortChange({
+            columnKey: nextSortColumn.columnKey,
+            direction: nextSortColumn.direction
+          });
+        }}
         onCellClick={(args: CellMouseArgs<GridRow>) => {
           onSelectRow(args.row._rowKey);
           const shouldOpenEditor =

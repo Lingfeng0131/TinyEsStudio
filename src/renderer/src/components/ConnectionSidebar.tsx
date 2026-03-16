@@ -131,13 +131,13 @@ export function ConnectionSidebar({
                       >
                         <Group justify="space-between" align="flex-start" wrap="nowrap">
                           <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
-                            <Group gap="xs">
+                            <Group gap="xs" className="sidebar-card-header">
                               <IconLink size={16} />
-                              <Text fw={600} truncate>
+                              <Text fw={600} truncate className="sidebar-card-title">
                                 {connection.name}
                               </Text>
                             </Group>
-                            <Text size="xs" c="dimmed" truncate>
+                            <Text size="xs" c="dimmed" truncate className="sidebar-card-subtitle">
                               {connection.nodeUrl}
                             </Text>
                           </Stack>
@@ -234,10 +234,10 @@ export function ConnectionSidebar({
                       >
                         <Group justify="space-between" wrap="nowrap">
                           <Stack gap={2} style={{ flex: 1, minWidth: 0 }}>
-                            <Text fw={600} truncate>
+                            <Text fw={600} truncate className="sidebar-card-title">
                               {index.name}
                             </Text>
-                            <Text size="xs" c="dimmed">
+                            <Text size="xs" c="dimmed" className="sidebar-card-subtitle">
                               文档 {index.docCount ?? '-'} · {index.health ?? 'unknown'}
                             </Text>
                           </Stack>

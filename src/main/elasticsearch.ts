@@ -18,6 +18,96 @@ import type {
 } from '../shared/types';
 import { getAllowedFilterOperators } from '../shared/filtering';
 
+function isNumericFieldType(fieldType: string): boolean {
+  return ['byte', 'short', 'integer', 'long', 'unsigned_long', 'half_float', 'float', 'double', 'scaled_float'].includes(
+    fieldType
+  );
+}
+
+function isDirectSortableFieldType(fieldType: string): boolean {
+  return (
+    fieldType === 'keyword' ||
+    fieldType === 'constant_keyword' ||
+    fieldType === 'boolean' ||
+    fieldType === 'date' ||
+    fieldType === 'date_nanos' ||
+    fieldType === 'ip' ||
+    fieldType === 'version' ||
+    isNumericFieldType(fieldType)
+  );
+}
+
+function getKeywordSortSubfield(mapping: Record<string, unknown>, fieldName: string): { field: string; type: string } | undefined {
+  const rawFields =
+    mapping.fields && typeof mapping.fields === 'object' && !Array.isArray(mapping.fields)
+      ? (mapping.fields as Record<string, unknown>)
+      : undefined;
+
+  if (!rawFields) {
+    return undefined;
+  }
+
+  for (const [subfieldName, subfieldValue] of Object.entries(rawFields)) {
+    if (!subfieldValue || typeof subfieldValue !== 'object' || Array.isArray(subfieldValue)) {
+      continue;
+    }
+
+    const subfieldMapping = subfieldValue as Record<string, unknown>;
+    const subfieldType = typeof subfieldMapping.type === 'string' ? subfieldMapping.type : '';
+
+    if (!['keyword', 'constant_keyword'].includes(subfieldType)) {
+      continue;
+    }
+
+    if (subfieldMapping.doc_values === false) {
+      continue;
+    }
+
+    return {
+      field: `${fieldName}.${subfieldName}`,
+      type: subfieldType
+    };
+  }
+
+  return undefined;
+}
+
+function resolveSortableField(
+  fieldName: string,
+  fieldType: string,
+  mapping: Record<string, unknown>
+): Pick<IndexFieldOption, 'sortable' | 'sortField' | 'sortFieldType'> {
+  if (mapping.doc_values === false) {
+    return {
+      sortable: false
+    };
+  }
+
+  if (isDirectSortableFieldType(fieldType)) {
+    return {
+      sortable: true,
+      sortField: fieldName,
+      sortFieldType: fieldType
+    };
+  }
+
+  if (fieldType === 'text') {
+    const keywordSubfield = getKeywordSortSubfield(mapping, fieldName);
+
+    if (keywordSubfield) {
+      return {
+        sortable: true,
+        sortField: keywordSubfield.field,
+        sortFieldType: keywordSubfield.type
+      };
+    }
+  }
+
+  return {
+    sortable: false
+  };
+}
+
 function collectFieldMappings(
   properties: Record<string, unknown> | undefined,
   prefix = '',
@@ -49,11 +139,14 @@ function collectFieldMappings(
     }
 
     if (fieldType !== 'object' && fieldType !== 'nested') {
+      const sortableField = resolveSortableField(fieldName, fieldType, mapping);
+
       fields.push({
         name: fieldName,
         type: fieldType,
         format: typeof mapping.format === 'string' ? mapping.format : undefined,
-        filterScope
+        filterScope,
+        ...sortableField
       });
     }
   });
@@ -332,6 +425,54 @@ function buildFilterClauses(
     .filter((item): item is Record<string, unknown> => item !== null);
 }
 
+function resolveSortFieldOption(
+  sortFieldName: string,
+  fieldOptions: Record<string, IndexFieldOption>
+): IndexFieldOption {
+  return getFieldOptionOrThrow(fieldOptions, sortFieldName);
+}
+
+function resolveSortUnmappedType(sortFieldType: string | undefined): string | undefined {
+  if (!sortFieldType) {
+    return undefined;
+  }
+
+  if (sortFieldType === 'constant_keyword') {
+    return 'keyword';
+  }
+
+  return sortFieldType;
+}
+
+function buildSortClause(
+  payload: SearchRequestPayload,
+  fieldOptions: Record<string, IndexFieldOption>
+): Array<Record<string, unknown>> | undefined {
+  const sort = payload.sort;
+
+  if (!sort?.field) {
+    return undefined;
+  }
+
+  const sortFieldOption = resolveSortFieldOption(sort.field, fieldOptions);
+
+  if (!sortFieldOption.sortable || !sortFieldOption.sortField) {
+    throw new Error(`字段 ${sort.field} 当前暂不支持排序`);
+  }
+
+  const order = sort.direction === 'asc' ? 'asc' : 'desc';
+  const unmappedType = resolveSortUnmappedType(sortFieldOption.sortFieldType);
+  return [
+    {
+      [sortFieldOption.sortField]: {
+        order,
+        missing: '_last',
+        ...(unmappedType ? { unmapped_type: unmappedType } : {})
+      }
+    }
+  ];
+}
+
 function buildSearchBody(
   payload: SearchRequestPayload,
   fieldOptions: Record<string, IndexFieldOption>
@@ -339,11 +480,12 @@ function buildSearchBody(
   const keyword = payload.keyword?.trim();
   const filterClauses = buildFilterClauses(payload.filters, fieldOptions);
   const filterJoinMode: FilterJoinMode = payload.filterJoinMode === 'or' ? 'or' : 'and';
+  const sortClause = buildSortClause(payload, fieldOptions);
 
   if (!keyword && filterClauses.length === 0) {
     return {
       query: { match_all: {} },
-      sort: [{ _score: 'desc' }]
+      sort: sortClause ?? [{ _score: 'desc' }]
     };
   }
 
@@ -368,7 +510,8 @@ function buildSearchBody(
               }
           : {})
       }
-    }
+    },
+    ...(sortClause ? { sort: sortClause } : {})
   };
 }
 
@@ -460,7 +603,8 @@ export async function fetchIndexFields(
   fields.unshift({
     name: '_id',
     type: 'metadata',
-    filterScope: 'standard'
+    filterScope: 'standard',
+    sortable: false
   });
 
   return fields.sort((a, b) => {

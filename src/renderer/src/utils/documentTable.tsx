@@ -623,6 +623,7 @@ export function buildColumns(
   fieldTypeMap: Record<string, string>,
   fieldFormatMap: Record<string, string>,
   fieldDateFormatHintMap: Record<string, string>,
+  sortableColumnKeySet: ReadonlySet<string>,
   checkedRowKeys: string[],
   onToggleCheck: (rowKey: string, checked: boolean) => void
 ): Column<GridRow>[] {
@@ -657,6 +658,7 @@ export function buildColumns(
       key: '_id',
       name: '_id',
       editable: (row) => row._isDraft === true,
+      sortable: sortableColumnKeySet.has('_id'),
       resizable: true,
       frozen: true,
       width: idSizing.width,
@@ -681,6 +683,7 @@ export function buildColumns(
       key: field,
       name: field,
       editable: true,
+      sortable: sortableColumnKeySet.has(field),
       resizable: true,
       width: sizing.width,
       minWidth: sizing.minWidth,
